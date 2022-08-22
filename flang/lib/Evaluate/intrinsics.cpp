@@ -2376,6 +2376,22 @@ static bool CheckForNonPositiveValues(FoldingContext &context,
   return ok;
 }
 
+static bool CheckDimAgainstRank(SpecificCall &call, FoldingContext &context) {
+  bool ok{true};
+  if (const auto &arrayArg{call.arguments[0]}) {
+     const auto rank = arrayArg->Rank();
+     if (const auto &dimArg{call.arguments[1]}) {
+        if (const auto dimNum{ToInt64(dimArg->UnwrapExpr())}) {
+           if (dimNum < 1 || dimNum > rank) {
+              ok = false;
+              context.messages().Say(dimArg->sourceLocation(), "DIM=%jd dimension is out of range for rank-%d array"_err_en_US, static_cast<std::intmax_t>(*dimNum), rank);
+           }
+        }
+     }
+  }
+  return ok;
+}
+
 // Applies any semantic checks peculiar to an intrinsic.
 static bool ApplySpecificChecks(SpecificCall &call, FoldingContext &context) {
   bool ok{true};
@@ -2392,12 +2408,26 @@ static bool ApplySpecificChecks(SpecificCall &call, FoldingContext &context) {
           arg ? arg->sourceLocation() : context.messages().at(),
           "Argument of ALLOCATED() must be an ALLOCATABLE object or component"_err_en_US);
     }
+  } else if (name == "any") {
+    return CheckDimAgainstRank(call, context);
   } else if (name == "associated") {
     return CheckAssociated(call, context);
+  } else if (name == "cshift") {
+     return CheckDimAgainstRank(call, context); // need to pass the dim arg since now its the 3rd argument, not the second
+  } else if (name == "count") {
+    return CheckDimAgainstRank(call, context);
+  } else if (name == "eoshift") {
+    return CheckDimAgainstRank(call, context);
+  } else if (name == "iall") {
+    return CheckDimAgainstRank(call, context);
+  } else if (name == "iany") {
+    return CheckDimAgainstRank(call, context);
   } else if (name == "image_status") {
     if (const auto &arg{call.arguments[0]}) {
       ok = CheckForNonPositiveValues(context, *arg, name, "image");
     }
+  } else if (name == "iparity") {
+    return CheckDimAgainstRank(call, context);
   } else if (name == "ishftc") {
     if (const auto &sizeArg{call.arguments[2]}) {
       ok = CheckForNonPositiveValues(context, *sizeArg, name, "size");
@@ -2416,6 +2446,8 @@ static bool ApplySpecificChecks(SpecificCall &call, FoldingContext &context) {
         }
       }
     }
+  } else if (name == "findloc") {
+    return CheckDimAgainstRank(call, context);
   } else if (name == "loc") {
     const auto &arg{call.arguments[0]};
     ok =
@@ -2425,6 +2457,18 @@ static bool ApplySpecificChecks(SpecificCall &call, FoldingContext &context) {
           arg ? arg->sourceLocation() : context.messages().at(),
           "Argument of LOC() must be an object or procedure"_err_en_US);
     }
+  } else if (name == "maxloc") {
+    return CheckDimAgainstRank(call, context);
+  } else if (name == "maxval") {
+    return CheckDimAgainstRank(call, context);
+  } else if (name == "minloc") {
+    return CheckDimAgainstRank(call, context);
+  } else if (name == "minval") {
+    return CheckDimAgainstRank(call, context);
+  } else if (name == "norm2") {
+    return CheckDimAgainstRank(call, context);
+  } else if (name == "parity") {
+    return CheckDimAgainstRank(call, context);
   } else if (name == "present") {
     const auto &arg{call.arguments[0]};
     if (arg) {
@@ -2439,6 +2483,8 @@ static bool ApplySpecificChecks(SpecificCall &call, FoldingContext &context) {
           arg ? arg->sourceLocation() : context.messages().at(),
           "Argument of PRESENT() must be the name of an OPTIONAL dummy argument"_err_en_US);
     }
+  } else if (name == "product") {
+    return CheckDimAgainstRank(call, context);
   } else if (name == "reduce") { // 16.9.161
     std::optional<DynamicType> arrayType;
     if (const auto &array{call.arguments[0]}) {
@@ -2523,6 +2569,10 @@ static bool ApplySpecificChecks(SpecificCall &call, FoldingContext &context) {
         }
       }
     }
+  } else if (name == "size") {
+    return CheckDimAgainstRank(call, context);
+  } else if (name == "sum") {
+    return CheckDimAgainstRank(call, context);
   }
   return ok;
 }
