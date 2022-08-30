@@ -22,6 +22,7 @@ program test_event_post
   !______ invalid event-variable ____________________________
 
   ! event-variable must be event_type
+  !ERROR: The event-variable must be of type EVENT_TYPE from module ISO_FORTRAN_ENV
   event post(non_event)
 
   ! event-variable must be a coarray
@@ -48,18 +49,18 @@ program test_event_post
 
   !______ invalid sync-stat-lists: redundant sync-stat-list ____________
 
-  ! No specifier shall appear more than once in a given sync-stat-list
+  !ERROR: A stat-variable in a sync-stat-list may not be repeated
   event post(concert, stat=sync_status, stat=superfluous_stat)
 
-  ! No specifier shall appear more than once in a given sync-stat-list
+  !ERROR: A errmsg-variable in a sync-stat-list may not be repeated
   event post(concert, errmsg=error_message, errmsg=superfluous_errmsg)
 
   !______ invalid sync-stat-lists: coindexed stat-variable ____________
 
-  ! Check constraint C1173 from the Fortran 2018 standard
+  !ERROR: A stat-variable or errmsg-variable in a sync-stat-list may not be a coindexed object
   event post(concert, stat=co_indexed_integer[1])
 
-  ! Check constraint C1173 from the Fortran 2018 standard
+  !ERROR: A stat-variable or errmsg-variable in a sync-stat-list may not be a coindexed object
   event post(concert, errmsg=co_indexed_character[1])
 
 end program test_event_post

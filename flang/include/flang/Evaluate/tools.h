@@ -1136,6 +1136,10 @@ bool IsBuiltinDerivedType(const DerivedTypeSpec *derived, const char *name);
 bool IsBuiltinCPtr(const Symbol &);
 // Is this derived type TEAM_TYPE from module ISO_FORTRAN_ENV?
 bool IsTeamType(const DerivedTypeSpec *);
+// Is this derived type EVENT_TYPE from module ISO_FORTRAN_ENV?
+bool IsEventType(const DerivedTypeSpec *);
+// Is this derived type LOCK_TYPE from module ISO_FORTRAN_ENV?
+bool IsLockType(const DerivedTypeSpec *);
 // Is this derived type TEAM_TYPE, C_PTR, or C_FUNPTR?
 bool IsBadCoarrayType(const DerivedTypeSpec *);
 // Is this derived type either C_PTR or C_FUNPTR from module ISO_C_BINDING

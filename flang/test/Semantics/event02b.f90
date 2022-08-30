@@ -21,16 +21,16 @@ program test_event_wait
 
   !_________________________ invalid event-variable ________________________________
 
-  ! event-variable must be event_type
+  !ERROR: The event-variable must be of type EVENT_TYPE from module ISO_FORTRAN_ENV
   event wait(non_event)
 
   ! event-variable must be a coarray
   event wait(non_coarray)
 
-  ! event-variable must not be coindexed
+  !ERROR: A event-variable in a EVENT WAIT statement may not be a coindexed object
   event wait(concert[1])
 
-  ! event-variable must not be coindexed
+  !ERROR: A event-variable in a EVENT WAIT statement may not be a coindexed object
   event wait(occurrences(1)[1])
 
   !ERROR: Must be a scalar value, but is a rank-1 array
@@ -44,7 +44,7 @@ program test_event_wait
   !ERROR: Must be a scalar value, but is a rank-1 array
   event wait(concert, until_count=non_scalar)
 
-  !_________________ invalid sync-stat-lists: invalid stat= ________________________
+  !_________________ invalid event-wait-spec-lists: invalid stat= ________________________
 
   !ERROR: Must have INTEGER type, but is LOGICAL(4)
   event wait(concert, stat=invalid_type)
@@ -52,7 +52,7 @@ program test_event_wait
   !ERROR: Must be a scalar value, but is a rank-1 array
   event wait(concert, stat=non_scalar)
 
-  !________________ invalid sync-stat-lists: invalid errmsg= _______________________
+  !________________ invalid event-wait-spec-lists: invalid errmsg= _______________________
 
   !ERROR: Must have CHARACTER type, but is LOGICAL(4)
   event wait(concert, errmsg=invalid_type)
@@ -62,21 +62,39 @@ program test_event_wait
 
   !______ invalid event-wait-spec-lists: redundant event-wait-spec-list ____________
 
-  ! No specifier shall appear more than once in a given event-wait-spec-list
+  !ERROR: Until-spec in a event-wait-spec-list may not be repeated
   event wait(concert, until_count=threshold, until_count=indexed(1))
 
-  ! No specifier shall appear more than once in a given event-wait-spec-list
+  !ERROR: A stat-variable in a event-wait-spec-list may not be repeated
   event wait(concert, stat=sync_status, stat=superfluous_stat)
 
-  ! No specifier shall appear more than once in a given event-wait-spec-list
+  !ERROR: A errmsg-variable in a event-wait-spec-list may not be repeated
   event wait(concert, errmsg=error_message, errmsg=superfluous_errmsg)
 
-  !_____________ invalid sync-stat-lists: coindexed stat-variable __________________
+  !ERROR: Until-spec in a event-wait-spec-list may not be repeated
+  event wait(concert, stat=sync_status, errmsg=error_message, until_count=threshold, until_count=indexed(1))
 
-  ! Check constraint C1173 from the Fortran 2018 standard
+  !ERROR: A stat-variable in a event-wait-spec-list may not be repeated
+  event wait(concert, stat=sync_status, errmsg=error_message, until_count=threshold, stat=superfluous_stat)
+
+  !ERROR: A errmsg-variable in a event-wait-spec-list may not be repeated
+  event wait(concert, stat=sync_status, errmsg=error_message, until_count=threshold, errmsg=superfluous_errmsg)
+
+  !ERROR: A stat-variable in a event-wait-spec-list may not be repeated
+  !ERROR: A errmsg-variable in a event-wait-spec-list may not be repeated
+  event wait(concert, stat=sync_status, errmsg=error_message, until_count=threshold, stat=superfluous_stat, errmsg=superfluous_errmsg)
+
+  !ERROR: A errmsg-variable in a event-wait-spec-list may not be repeated
+  !ERROR: A stat-variable in a event-wait-spec-list may not be repeated
+  !ERROR: Until-spec in a event-wait-spec-list may not be repeated
+  event wait(concert, stat=sync_status, errmsg=error_message, until_count=threshold, errmsg=superfluous_errmsg, stat=superfluous_stat, until_count=indexed(1))
+
+  !_____________ invalid event-wait-spec-lists: coindexed objects __________________
+
+  !ERROR: A stat-variable or errmsg-variable in a event-wait-spec-list may not be a coindexed object
   event wait(concert, stat=co_indexed_integer[1])
 
-  ! Check constraint C1173 from the Fortran 2018 standard
+  !ERROR: A stat-variable or errmsg-variable in a event-wait-spec-list may not be a coindexed object
   event wait(concert, errmsg=co_indexed_character[1])
 
 end program test_event_wait
