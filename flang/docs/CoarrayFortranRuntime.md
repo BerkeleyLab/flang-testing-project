@@ -34,7 +34,7 @@ In addition to being able to support syntax related to the above features, compi
  * **Image control statements:**
    - _Pre-existing statements_: `allocate`, `deallocate`, `stop`, `end`, a `call` referencing `move_alloc` with coarray arguments
    - _New statements:_ `sync all`, `sync images`, `sync memory`, `sync team`, `change team`, `end team`, `critical`, `end critical`, `event post`, `event wait`, `form team`, `lock`, `unlock`
-, one consequence of which is to limit the code movement in optimizing compilersSupporting some required behavior will necessitate modifying the behavior of existing
+One consequence of the statements being categorizing statements as image control will be the need to restrict code movement by optimizing compilers.
 
 # Proposed solution
   This design document proposes an application programming interface (API) to support the above features.  Implementations of some parts of the API exist in [Caffeine], a parallel runtime library targeting coarray Fortran compilers.  By defining a library-agnostic API, we envision facilitating the development of alternative parallel runtime libraries that support the same API.  One benefit of this approach is the ability to vary the communication substrate.  For example, Caffeine uses the [GASNet-EX] exascale networking middleware, whereas it might also be possible to develop wrappers that would support the proposed API with [OpenCoarrays], which uses the Message Passing Interface ([MPI]). A central aim of this document is to use a parallel runtime API in standard Fortran syntax, which enables us to leverage the Fortran to succinctly express various properties of the procedure interfaces, including argument attributes.  See [Rouson and Bonachea (2022)] for additional details.
