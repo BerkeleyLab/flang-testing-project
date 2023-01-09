@@ -56,8 +56,9 @@ One consequence of the statements being categorizing statements as image control
 | Track corank of coarrays                |     ✓     |           |
 | Track teams associated with a coarray   |     ✓     |           |
 | Assigning variables of type `team-type` |     ✓     |           |
-| Track when implicit coarray deallocation needs to occur when exiting a scope |     ✓     |           |
+| Track coarrays for implicit deallocation when exiting a scope |     ✓     |           |
 | Implementing the intrinsic `coshape`    |     ?     |     ?     |
+| Track allocatable coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
 | Team stack abstraction                  |           |     ✓     |
 | `form-team-stmt`                        |           |     ✓     |
 | `change-team-stmt`                      |           |     ✓     |
