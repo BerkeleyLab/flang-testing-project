@@ -8,12 +8,12 @@
 
 # Problem description
   In order to be fully Fortran 2018 compliant, Flang needs to add support for what is commonly referred to as coarray fortran, which includes features related to parallelism. These features include the following statements, subroutines, functions, types, and kind type parameters:
-  
-  * **Statements:** 
-    - _Synchronization:_ `sync all`, `sync images`, `sync memory`, `sync team` 
+
+  * **Statements:**
+    - _Synchronization:_ `sync all`, `sync images`, `sync memory`, `sync team`
     - _Events:_ `event post`, `event wait`
     - _Error termination:_ `error stop`
-    - _Locks:_ `lock`, `unlock` 
+    - _Locks:_ `lock`, `unlock`
     - _Failed images:_ `fail image`
     - _Teams:_ `form team`, `change team`
     - _Critical sections:_ `critical`, `end critical`
@@ -56,6 +56,7 @@ One consequence of the statements being categorizing statements as image control
 | Track corank of coarrays                |     ✓     |           |
 | Track teams associated with a coarray   |     ✓     |           |
 | Assigning variables of type `team-type` |     ✓     |           |
+| Translate critical construct to lock/unlock |     ✓     |           |
 | Track coarrays for implicit deallocation when exiting a scope |     ✓     |           |
 | Implementing the intrinsic `coshape`    |     ?     |     ?     |
 | Track allocatable coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
@@ -65,9 +66,101 @@ One consequence of the statements being categorizing statements as image control
 | `end-team-stmt`                         |           |     ✓     |
 | Allocate a coarray                      |           |     ✓     |
 | Deallocate a coarray                    |           |     ✓     |
-| Reference a coarray                     |           |     ✓     |
+| Reference a coindexed-object           |           |     ✓     |
+
+Add to table: teams, events, synchronization statements, critical construct, locks
+
+## Compiler facing Caffeine API
+
+### Puts and Gets
+
+Current pseudo code. May not stay in design doc.
+
+```
+  module subroutine caf_put_blocking(coarray, coindices, target, value, team, team_number, stat)
+    implicit none
+    type(caf_co_handle), intent(in) :: coarray
+    integer, intent(in) :: coindices(:)
+    type(*), dimension(..), intent(in) :: target, value
+    type(team_type), optional, intent(in) :: team
+    integer, optional, intent(in) :: team_number
+    integer, optional, intent(out) :: stat
+  end subroutine
+
+  module subroutine caf_get_blocking(coarray, coindices, source, value, team, team_number, stat)
+    implicit none
+    type(caf_co_handle), intent(in) :: coarray
+    integer, intent(in) :: coindices(:)
+    type(*), dimension(..), intent(in) :: source
+    type(*), dimension(..), intent(inout) :: value
+    type(team_type), optional, intent(in) :: team
+    integer, optional, intent(in) :: team_number
+    integer, optional, intent(out) :: stat
+  end subroutine
+```
+  * **caf_put_blocking:**
+    -   Description: ...
+    -   Procedure Interface: `subroutine caf_put_blocking(coarray, coindices, target, value, team, team_number, stat)`
+
+  * **caf_get_blocking:**
+    -   Description: ...
+    -   Procedure Interface: `subroutine caf_get_blocking(coarray, coindices, source, value, team, team_number, stat)`
+
+  Arguments to `caf_put_blocking` and `caf_get_blocking`:
+
+| Argument | Type | Rank | Dimensions | Intent | Additional attributes | Notes |
+| -------- | ---- | ---- | ---------- | ------ | --------------------- | ----- |
+| `coarray` | `caf_co_handle` | 0 | n/a | `intent(in)` | n/a | caf_co_handle will be a derived type provided by Caffeine. This argument is a handle for the established coarray. This handle will be created when the coarray is established. |
+| `coindices` | `integer` | 1 | dimension(:) | `intent(in)` | n/a | ----- |
+| `target` | `type(*)` | 1 | dimension(..) | `intent(in)` | n/a | ----- |
+| `value`  | `type(*)` | 1 | dimension(..) | `intent(in)` for gets, `intent(inout)` for puts | n/a | ----- |
+| `team` | `team_type` | 0 | n/a | `intent(in)` | optional | Both optional arguments `team` and `team_number` shall not be present in the same call|
+| `team_number` |  `integer` | 0 | n/a | `intent(in)` | optional | Both optional arguments `team` and `team_number` shall not be present in the same call|
+| `stat` | `integer` | 0 | n/a | `intent(out)` | optional | ----- |
+
+  * **Asynchrony:**
+    -   Could be handle based or fence based approaches
+    -   Handle based - return can individual operation handle, later on compiler synchronizes handle
+    -   Fence based - implicit handle operations, closer to MPI
+
+### Atomic subroutines
+
+  * **caf_atomic_define:**
+    -   Description: ...
+    -   Procedure Interface: ...
+    -   Arguments: ...
+
+  * **caf_atomic_ref:**
+    -   Description: ...
+    -   Procedure Interface: ...
+    -   Arguments: ...
+
+  * **caf_atomic_add:**
+    -   Description: Blocking atomic operation...
+    -   Procedure Interface:   `subroutine caf_atomic_add(coarray, coindicies, offset, value, stat)` or `subroutine caf_atomic_add(coarray, coindicies, target, value, stat)`
+    -   Arguments: ...
 
 
+Current pseudo code. May not stay in design doc.
+
+Option 1 with offset:
+```
+  module subroutine caf_atomic_add(coarray, coindicies, offset, value, stat) ! blocking atomic operation
+    type(caf_co_handle) :: coarray
+    integer, intent(in) :: coindices(:)
+    integer :: offset
+    integer(kind=atomic_int_kind) :: value
+  end subroutine
+```
+
+Option 2 with target:
+```
+  module subroutine caf_atomic_add(coarray, coindicies, target, value, stat) ! blocking atomic operation
+    type(caf_co_handle) :: coarray
+    integer, intent(in) :: coindices(:)
+    type(*), intent(in) :: target
+  end subroutine
+```
 
 # Testing plan
 [tbd]
