@@ -58,7 +58,8 @@ One consequence of the statements being categorizing statements as image control
 | Assigning variables of type `team-type` |     ✓     |           |
 | Translate critical construct to lock/unlock |     ✓     |           |
 | Track coarrays for implicit deallocation when exiting a scope |     ✓     |           |
-| Implementing the intrinsic `coshape`    |     ?     |     ?     |
+| Initialize a coarray with SOURCE= as part of allocate-stmt |     ✓     |           |
+| Implementing the intrinsics `coshape`, `lcobound`, and `ucobound`, `image_index` and keeping track of corank    |     ?     |     ?     |
 | Track allocatable coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
 | Team stack abstraction                  |           |     ✓     |
 | `form-team-stmt`                        |           |     ✓     |
@@ -68,9 +69,46 @@ One consequence of the statements being categorizing statements as image control
 | Deallocate a coarray                    |           |     ✓     |
 | Reference a coindexed-object           |           |     ✓     |
 
+
 Add to table: teams, events, synchronization statements, critical construct, locks
 
 ## Compiler facing Caffeine API
+
+
+### Allocation and deallocation
+
+Draft:
+
+caf_allocate is called when the compiler wants to allocate a coarray, or when there is a statically declared coarray
+
+Compiler-tracks-codescriptor
+```
+  module subroutine caf_allocate(coarray_handle, local_slice)
+    implicit none
+    type(caf_co_handle), intent(out) :: coarray_handle
+    type(*), dimension(..), intent(inout) :: local_slice
+  end subroutine
+```
+In this case, compiler would provide `image_index`, `coshape`, `lcobound`, `ucobound` and keep track of corank
+
+Caffeine-tracks-codescriptor
+```
+  module subroutine caf_allocate(lbounds, sizes, coarray_handle, local_slice)
+    implicit none
+    type(caf_co_handle), intent(out) :: coarray_handle
+    type(*), dimension(..), intent(inout) :: local_slice
+    integer, dimension(:), intent(in) :: lbounds, sizes !precondition these args must be same size
+  end subroutine
+```
+In this case, Caffeine would provide `image_index`, `coshape`, `lcobound`, `ucobound` and keep track of corank
+
+
+```
+  module subroutine caf_deallocate(coarray_handles)
+    implicit none
+    type(caf_co_handle), dimension(:), intent(out) :: coarray_handles
+  end subroutine
+```
 
 ### Puts and Gets
 
