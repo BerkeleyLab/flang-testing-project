@@ -59,7 +59,8 @@ One consequence of the statements being categorizing statements as image control
 | Translate critical construct to lock/unlock |     ✓     |           |
 | Track coarrays for implicit deallocation when exiting a scope |     ✓     |           |
 | Initialize a coarray with SOURCE= as part of allocate-stmt |     ✓     |           |
-| Implementing the intrinsics `coshape`, `lcobound`, and `ucobound`, `image_index` and keeping track of corank    |     ?     |     ?     |
+| Keeping track of corank |     ✓     |     ?      |
+| Implementing the intrinsics `coshape`, `lcobound`, and `ucobound`, `image_index`  |     ?     |     ?     |
 | Track allocatable coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
 | Team stack abstraction                  |           |     ✓     |
 | `form-team-stmt`                        |           |     ✓     |
@@ -89,7 +90,7 @@ Compiler-tracks-codescriptor
     type(*), dimension(..), intent(inout) :: local_slice
   end subroutine
 ```
-In this case, compiler would provide `image_index`, `coshape`, `lcobound`, `ucobound` and keep track of corank
+In this case, compiler would provide `image_index`, `coshape`, `lcobound`, `ucobound`
 
 Caffeine-tracks-codescriptor
 ```
@@ -100,7 +101,7 @@ Caffeine-tracks-codescriptor
     integer, dimension(:), intent(in) :: lbounds, sizes !precondition these args must be same size
   end subroutine
 ```
-In this case, Caffeine would provide `image_index`, `coshape`, `lcobound`, `ucobound` and keep track of corank
+In this case, Caffeine would provide `image_index`, `coshape`, `lcobound`, `ucobound`
 
 
 ```
@@ -199,6 +200,29 @@ Option 2 with target:
     type(*), intent(in) :: target
   end subroutine
 ```
+
+
+
+## Berkeley Lab internal Notes: (REMOVE before submission)
+
+### `caf_co_handle`
+
+   The following is a Fortran heavy pseudo code, not the exact implementation we plan
+   ```
+   type caf_co_handle
+     type(c_ptr) :: base_addr
+     integer, allocatable, dimension(:) :: lbounds, sizes
+     !integer :: established_team ! probably not necessary unless we want to bounds check
+   end type
+   ```
+
+flexible array member in c
+
+### Caffeine internals for coarray accesses
+  Coarray access could start with image_index, with the same coarray coindicies and team identifier argument
+  and would get back a single integer, which is the image number in that team
+  Then can use that to pass into internal query about team and global image index and can use it to bounds check.
+
 
 # Testing plan
 [tbd]
