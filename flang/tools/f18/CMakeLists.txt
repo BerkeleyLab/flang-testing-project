@@ -19,7 +19,7 @@ set(MODULES
 )
 
 # Create module files directly from the top-level module source directory.
-# If CMAKE_CROSSCOMPILING, then the newly built flang-new executable was
+# If CMAKE_CROSSCOMPILING, then the newly built flang executable was
 # cross compiled, and thus can't be executed on the build system and thus
 # can't be used for generating module files.
 if (NOT CMAKE_CROSSCOMPILING)
@@ -39,9 +39,9 @@ if (NOT CMAKE_CROSSCOMPILING)
     endif()
     add_custom_command(OUTPUT ${base}.mod
       COMMAND ${CMAKE_COMMAND} -E make_directory ${FLANG_INTRINSIC_MODULES_DIR}
-      COMMAND flang-new -fc1 -cpp -fsyntax-only -module-dir ${FLANG_INTRINSIC_MODULES_DIR}
+      COMMAND flang -fc1 -cpp -fsyntax-only -module-dir ${FLANG_INTRINSIC_MODULES_DIR}
         ${FLANG_SOURCE_DIR}/module/${filename}.f90
-      DEPENDS flang-new ${FLANG_SOURCE_DIR}/module/${filename}.f90 ${depends}
+      DEPENDS flang ${FLANG_SOURCE_DIR}/module/${filename}.f90 ${depends}
     )
     add_custom_command(OUTPUT ${base}.f18.mod
       DEPENDS ${base}.mod

@@ -1,6 +1,6 @@
 ! This test checks lowering of OpenMP declare target Directive.
 
-// RUN: not flang-new -fc1 -emit-fir -fopenmp %s 2>&1 | FileCheck %s
+// RUN: not %flang_fc1 -emit-fir -fopenmp %s 2>&1 | FileCheck %s
 
 module mod1
 contains

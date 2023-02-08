@@ -205,7 +205,7 @@ categorise_opts()
 
     if
       # The options claimed by Flang. This list needs to be compatible with
-      # what's supported by Flang's compiler driver (i.e. `flang-new`).
+      # what's supported by Flang's compiler driver (i.e. `flang`).
       [[ $opt == "-cpp" ]] ||
       [[ $opt =~ ^-D.* ]] ||
       [[ $opt == "-E" ]] ||
@@ -232,7 +232,7 @@ categorise_opts()
       [[ $opt == "-Werror" ]]; then
       flang_opts+=($opt)
     elif
-      # We translate the following into equivalents understood by `flang-new`
+      # We translate the following into equivalents understood by `flang`
       [[ $opt == "-Mfixed" ]] || [[ $opt == "-Mfree" ]]; then
         case $opt in
           -Mfixed)
@@ -244,7 +244,7 @@ categorise_opts()
           ;;
 
         *)
-          echo "ERROR: $opt has no equivalent in 'flang-new'"
+          echo "ERROR: $opt has no equivalent in 'flang'"
           exit 1
           ;;
       esac
@@ -305,9 +305,9 @@ preprocess() {
 
   # Preprocess fortran sources using Flang
   for idx in "${!fortran_srcs[@]}"; do
-    if ! "$wd/bin/flang-new" -E "${opts[@]}" "${fortran_srcs[$idx]}" ${output_definition:+$output_definition}
+    if ! "$wd/bin/flang" -E "${opts[@]}" "${fortran_srcs[$idx]}" ${output_definition:+$output_definition}
     then status=$?
-         echo flang: in "$PWD", flang-new failed with exit status $status: "$wd/bin/flang-new" "${opts[@]}" "$@" >&2
+         echo flang: in "$PWD", flang failed with exit status $status: "$wd/bin/flang" "${opts[@]}" "$@" >&2
          exit $status
     fi
   done
@@ -316,7 +316,7 @@ preprocess() {
   for idx in "${!other_srcs[@]}"; do
     if ! $ext_fc -E "${opts[@]}" "${other_srcs[$idx]}" ${output_definition:+$output_definition}
     then status=$?
-         echo flang: in "$PWD", flang-new failed with exit status $status: "$wd/bin/flang-new" "${opts[@]}" "$@" >&2
+         echo flang: in "$PWD", flang failed with exit status $status: "$wd/bin/flang" "${opts[@]}" "$@" >&2
          exit $status
     fi
   done
@@ -408,11 +408,11 @@ main() {
   [[ ! -z ${INTRINSICS_MOD_DIR} ]] && flang_options+=("-intrinsics-module-directory ${INTRINSICS_MOD_DIR}")
   for idx in "${!fortran_source_files[@]}"; do
     set +e
-    "$wd/bin/flang-new" "${flang_options[@]}" "${fortran_source_files[$idx]}" -o "${unparsed_file_base}_${idx}.f90"
+    "$wd/bin/flang" "${flang_options[@]}" "${fortran_source_files[$idx]}" -o "${unparsed_file_base}_${idx}.f90"
     ret_status=$?
     set -e
     if [[ $ret_status != 0 ]]; then
-         echo flang: in "$PWD", flang-new failed with exit status "$ret_status": "$wd/bin/flang-new" "${flang_options[@]}" "$@" >&2
+         echo flang: in "$PWD", flang failed with exit status "$ret_status": "$wd/bin/flang" "${flang_options[@]}" "$@" >&2
          exit "$ret_status"
     fi
   done
