@@ -113,10 +113,19 @@ In this case, Caffeine would provide `image_index`, `coshape`, `lcobound`, `ucob
 
 ### Puts and Gets
 
+
+Semantics: Puts and gets will maintain serial dependencies for the issuing image.
+           A non-blocking get has to be started and finished in the same segment.
+           (same non-blocking semantics will likely apply to collectives, use caf_wait_for, caf_try_for, etc)
+           (should change team and critical be non-blocking? sync-all?)
+
 Current pseudo code. May not stay in design doc.
 
+Will have fence based puts
+split phased gets
+
 ```
-  module subroutine caf_put_blocking(coarray, coindices, target, value, team, team_number, stat)
+  module subroutine caf_put(coarray, coindices, team, team_number, target, value, stat)
     implicit none
     type(caf_co_handle), intent(in) :: coarray
     integer, intent(in) :: coindices(:)
@@ -126,24 +135,55 @@ Current pseudo code. May not stay in design doc.
     integer, optional, intent(out) :: stat
   end subroutine
 
-  module subroutine caf_get_blocking(coarray, coindices, source, value, team, team_number, stat)
+  ! any puts that are still in flight need to commited
+  ! throw away any caches
+  ! not synchronizing operation
+  ! caf_end_segment is a side effect of image control stmts
+  module subroutine caf_end_segment()
+    implicit none
+  end subroutine
+
+  module subroutine caf_get_blocking(coarray, coindices, team, team_number, source, value, stat)
     implicit none
     type(caf_co_handle), intent(in) :: coarray
     integer, intent(in) :: coindices(:)
-    type(*), dimension(..), intent(in) :: source
+    type(*), dimension(..), intent(in) :: source ! useful to get the "shape" of the thing, not the value of this dummy arg, compiler needs to ensure this dummy arg is not a copy for this strategy to work, compiler's codegen needs to ensure that this (and other subroutine calls) are not using copies for this arg
     type(*), dimension(..), intent(inout) :: value
     type(team_type), optional, intent(in) :: team
     integer, optional, intent(in) :: team_number
     integer, optional, intent(out) :: stat
   end subroutine
-```
-  * **caf_put_blocking:**
-    -   Description: ...
-    -   Procedure Interface: `subroutine caf_put_blocking(coarray, coindices, target, value, team, team_number, stat)`
 
+  module subroutine caf_get_non_blocking(coarray, coindices, team, team_number, source, value, stat, async_handle)
+    implicit none
+    type(caf_co_handle), intent(in) :: coarray
+    integer, intent(in) :: coindices(:)
+    type(*), dimension(..), intent(in) :: source
+    type(*), dimension(..), intent(inout) :: value ! may need asynchronous attribute or may be implicitly asynchronous
+    type(team_type), optional, intent(in) :: team
+    integer, optional, intent(in) :: team_number
+    integer, optional, intent(out) :: stat
+    type(caf_async_handle), intent(out) :: async_handle
+  end subroutine
+
+  ! waits until operation
+  ! consumes handle
+  module subroutine caf_wait_for(async_handle)
+    implicit none
+    type(caf_async_handle), intent(inout) :: async_handle
+  end subroutine
+
+  ! consumes handle IF finished
+  module subroutine caf_try_for(async_handle, finished)
+    implicit none
+    type(caf_async_handle), intent(inout) :: async_handle
+    logical, intent(out) :: finished
+  end subroutine
+
+```
   * **caf_get_blocking:**
     -   Description: ...
-    -   Procedure Interface: `subroutine caf_get_blocking(coarray, coindices, source, value, team, team_number, stat)`
+    -   Procedure Interface: `subroutine caf_get_blocking(coarray, coindices, team, team_number, source, value, stat)`
 
   Arguments to `caf_put_blocking` and `caf_get_blocking`:
 
@@ -187,8 +227,7 @@ Option 1 with offset:
   module subroutine caf_atomic_add(coarray, coindicies, offset, value, stat) ! blocking atomic operation
     type(caf_co_handle) :: coarray
     integer, intent(in) :: coindices(:)
-    integer :: offset
-    integer(kind=atomic_int_kind) :: value
+    integer :: offset, value, stat
   end subroutine
 ```
 
@@ -196,8 +235,9 @@ Option 2 with target:
 ```
   module subroutine caf_atomic_add(coarray, coindicies, target, value, stat) ! blocking atomic operation
     type(caf_co_handle) :: coarray
-    integer, intent(in) :: coindices(:)
-    type(*), intent(in) :: target
+    integer, intent(in) :: coindices(:) ! names image num
+    integer(kind=atomic_int_kind), intent(in) :: target !location of target is relevant, not the value of target, need this to compute the offset when the `atom` dummy argument to the intrinsic is part of a derived type
+    integer :: value, stat
   end subroutine
 ```
 
@@ -215,6 +255,12 @@ Option 2 with target:
      !integer :: established_team ! probably not necessary unless we want to bounds check
    end type
    ```
+
+TODOs:
+    allow for non-blocking collective subroutines
+    need to be able to track puts in flight, may need a write buffer, record boundaries in a hash table struct
+    every single rma needs to check the table to see if there is a conflicting overlap
+    could add caching
 
 flexible array member in c
 
