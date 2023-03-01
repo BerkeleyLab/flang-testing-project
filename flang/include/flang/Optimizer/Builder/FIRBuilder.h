@@ -24,11 +24,12 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Optional.h"
+#include <optional>
 
 namespace fir {
 class AbstractArrayBox;
 class ExtendedValue;
+class MutableBoxValue;
 class BoxValue;
 
 //===----------------------------------------------------------------------===//
@@ -43,14 +44,14 @@ public:
       : OpBuilder{op, /*listener=*/this}, kindMap{kindMap} {}
   explicit FirOpBuilder(mlir::OpBuilder &builder,
                         const fir::KindMapping &kindMap)
-      : OpBuilder{builder}, kindMap{kindMap} {
+      : OpBuilder(builder), OpBuilder::Listener(), kindMap{kindMap} {
     setListener(this);
   }
 
   // The listener self-reference has to be updated in case of copy-construction.
   FirOpBuilder(const FirOpBuilder &other)
-      : OpBuilder{other}, kindMap{other.kindMap}, fastMathFlags{
-                                                      other.fastMathFlags} {
+      : OpBuilder(other), OpBuilder::Listener(), kindMap{other.kindMap},
+        fastMathFlags{other.fastMathFlags} {
     setListener(this);
   }
 
@@ -337,6 +338,10 @@ public:
   mlir::Value createBox(mlir::Location loc, const fir::ExtendedValue &exv,
                         bool isPolymorphic = false);
 
+  mlir::Value createBox(mlir::Location loc, mlir::Type boxType,
+                        mlir::Value addr, mlir::Value shape, mlir::Value slice,
+                        llvm::ArrayRef<mlir::Value> lengths, mlir::Value tdesc);
+
   /// Create constant i1 with value 1. if \p b is true or 0. otherwise
   mlir::Value createBool(mlir::Location loc, bool b) {
     return createIntegerConstant(loc, getIntegerType(1), b ? 1 : 0);
@@ -402,6 +407,11 @@ public:
   IfBuilder genIfThenElse(mlir::Location loc, mlir::Value cdt) {
     auto op = create<fir::IfOp>(loc, std::nullopt, cdt, true);
     return IfBuilder(op, *this);
+  }
+
+  mlir::Value genNot(mlir::Location loc, mlir::Value boolean) {
+    return create<mlir::arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq,
+                                       boolean, createBool(loc, false));
   }
 
   /// Generate code testing \p addr is not a null address.
@@ -568,7 +578,8 @@ void genScalarAssignment(fir::FirOpBuilder &builder, mlir::Location loc,
 /// derived types (10.2.1.3 point 13).
 void genRecordAssignment(fir::FirOpBuilder &builder, mlir::Location loc,
                          const fir::ExtendedValue &lhs,
-                         const fir::ExtendedValue &rhs);
+                         const fir::ExtendedValue &rhs,
+                         bool needFinalization = false);
 
 /// Builds and returns the type of a ragged array header used to cache mask
 /// evaluations. RaggedArrayHeader is defined in
@@ -595,8 +606,8 @@ mlir::Value createZeroValue(fir::FirOpBuilder &builder, mlir::Location loc,
                             mlir::Type type);
 
 /// Get the integer constants of triplet and compute the extent.
-llvm::Optional<std::int64_t>
-getExtentFromTriplet(mlir::Value lb, mlir::Value ub, mlir::Value stride);
+std::optional<std::int64_t> getExtentFromTriplet(mlir::Value lb, mlir::Value ub,
+                                                 mlir::Value stride);
 
 /// Generate max(\p value, 0) where \p value is a scalar integer.
 mlir::Value genMaxWithZero(fir::FirOpBuilder &builder, mlir::Location loc,

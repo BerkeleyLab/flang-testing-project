@@ -132,7 +132,7 @@ UnsignedDivisionByConstantInfo::get(const APInt &D, unsigned LeadingZeros,
            (Q1.ult(Delta) || (Q1 == Delta && R1.isZero())));
 
   if (Retval.IsAdd && !D[0] && AllowEvenDivisorOptimization) {
-    unsigned PreShift = D.countTrailingZeros();
+    unsigned PreShift = D.countr_zero();
     APInt ShiftedD = D.lshr(PreShift);
     Retval =
         UnsignedDivisionByConstantInfo::get(ShiftedD, LeadingZeros + PreShift);
@@ -143,7 +143,12 @@ UnsignedDivisionByConstantInfo::get(const APInt &D, unsigned LeadingZeros,
 
   Retval.Magic = std::move(Q2);             // resulting magic number
   ++Retval.Magic;
-  Retval.ShiftAmount = P - D.getBitWidth(); // resulting shift
+  Retval.PostShift = P - D.getBitWidth(); // resulting shift
+  // Reduce shift amount for IsAdd.
+  if (Retval.IsAdd) {
+    assert(Retval.PostShift > 0 && "Unexpected shift");
+    Retval.PostShift -= 1;
+  }
   Retval.PreShift = 0;
   return Retval;
 }

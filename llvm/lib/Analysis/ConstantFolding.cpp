@@ -561,8 +561,8 @@ Constant *FoldReinterpretLoadFromConst(Constant *C, Type *LoadTy,
         !LoadTy->isVectorTy())
       return nullptr;
 
-    Type *MapTy = Type::getIntNTy(
-          C->getContext(), DL.getTypeSizeInBits(LoadTy).getFixedSize());
+    Type *MapTy = Type::getIntNTy(C->getContext(),
+                                  DL.getTypeSizeInBits(LoadTy).getFixedValue());
     if (Constant *Res = FoldReinterpretLoadFromConst(C, MapTy, Offset, DL)) {
       if (Res->isNullValue() && !LoadTy->isX86_MMXTy() &&
           !LoadTy->isX86_AMXTy())
@@ -705,7 +705,7 @@ Constant *llvm::ConstantFoldLoadFromConst(Constant *C, Type *Ty,
   // Explicitly check for out-of-bounds access, so we return poison even if the
   // constant is a uniform value.
   TypeSize Size = DL.getTypeAllocSize(C->getType());
-  if (!Size.isScalable() && Offset.sge(Size.getFixedSize()))
+  if (!Size.isScalable() && Offset.sge(Size.getFixedValue()))
     return PoisonValue::get(Ty);
 
   // Try an offset-independent fold of a uniform value.
@@ -713,7 +713,7 @@ Constant *llvm::ConstantFoldLoadFromConst(Constant *C, Type *Ty,
     return Result;
 
   // Try hard to fold loads from bitcasted strange and non-type-safe things.
-  if (Offset.getMinSignedBits() <= 64)
+  if (Offset.getSignificantBits() <= 64)
     if (Constant *Result =
             FoldReinterpretLoadFromConst(C, Ty, Offset.getSExtValue(), DL))
       return Result;
@@ -729,26 +729,23 @@ Constant *llvm::ConstantFoldLoadFromConst(Constant *C, Type *Ty,
 Constant *llvm::ConstantFoldLoadFromConstPtr(Constant *C, Type *Ty,
                                              APInt Offset,
                                              const DataLayout &DL) {
+  // We can only fold loads from constant globals with a definitive initializer.
+  // Check this upfront, to skip expensive offset calculations.
+  auto *GV = dyn_cast<GlobalVariable>(getUnderlyingObject(C));
+  if (!GV || !GV->isConstant() || !GV->hasDefinitiveInitializer())
+    return nullptr;
+
   C = cast<Constant>(C->stripAndAccumulateConstantOffsets(
           DL, Offset, /* AllowNonInbounds */ true));
 
-  if (auto *GV = dyn_cast<GlobalVariable>(C))
-    if (GV->isConstant() && GV->hasDefinitiveInitializer())
-      if (Constant *Result = ConstantFoldLoadFromConst(GV->getInitializer(), Ty,
-                                                       Offset, DL))
-        return Result;
+  if (C == GV)
+    if (Constant *Result = ConstantFoldLoadFromConst(GV->getInitializer(), Ty,
+                                                     Offset, DL))
+      return Result;
 
   // If this load comes from anywhere in a uniform constant global, the value
   // is always the same, regardless of the loaded offset.
-  if (auto *GV = dyn_cast<GlobalVariable>(getUnderlyingObject(C))) {
-    if (GV->isConstant() && GV->hasDefinitiveInitializer()) {
-      if (Constant *Res =
-              ConstantFoldLoadFromUniformValue(GV->getInitializer(), Ty))
-        return Res;
-    }
-  }
-
-  return nullptr;
+  return ConstantFoldLoadFromUniformValue(GV->getInitializer(), Ty);
 }
 
 Constant *llvm::ConstantFoldLoadFromConstPtr(Constant *C, Type *Ty,
@@ -903,11 +900,10 @@ Constant *SymbolicallyEvaluateGEP(const GEPOperator *GEP,
       return nullptr;
 
   unsigned BitWidth = DL.getTypeSizeInBits(IntIdxTy);
-  APInt Offset =
-      APInt(BitWidth,
-            DL.getIndexedOffsetInType(
-                SrcElemTy,
-                makeArrayRef((Value * const *)Ops.data() + 1, Ops.size() - 1)));
+  APInt Offset = APInt(
+      BitWidth,
+      DL.getIndexedOffsetInType(
+          SrcElemTy, ArrayRef((Value *const *)Ops.data() + 1, Ops.size() - 1)));
   Ptr = StripPtrCastKeepAS(Ptr);
 
   // If this is a GEP of a GEP, fold it all into a single GEP.
@@ -1087,7 +1083,7 @@ Constant *ConstantFoldInstOperandsImpl(const Value *InstOrCE, unsigned Opcode,
     }
     return nullptr;
   case Instruction::Select:
-    return ConstantExpr::getSelect(Ops[0], Ops[1], Ops[2]);
+    return ConstantFoldSelectInstruction(Ops[0], Ops[1], Ops[2]);
   case Instruction::ExtractElement:
     return ConstantExpr::getExtractElement(Ops[0], Ops[1]);
   case Instruction::ExtractValue:
@@ -1868,7 +1864,7 @@ Constant *ConstantFoldSSEConvertToInt(const APFloat &Val, bool roundTowardZero,
   APFloat::roundingMode mode = roundTowardZero? APFloat::rmTowardZero
                                               : APFloat::rmNearestTiesToEven;
   APFloat::opStatus status =
-      Val.convertToInteger(makeMutableArrayRef(UIntVal), ResultWidth,
+      Val.convertToInteger(MutableArrayRef(UIntVal), ResultWidth,
                            IsSigned, mode, &isExact);
   if (status != APFloat::opOK &&
       (!roundTowardZero || status != APFloat::opInexact))
@@ -2399,7 +2395,7 @@ static Constant *ConstantFoldScalarCall1(StringRef Name,
     case Intrinsic::bswap:
       return ConstantInt::get(Ty->getContext(), Op->getValue().byteSwap());
     case Intrinsic::ctpop:
-      return ConstantInt::get(Ty, Op->getValue().countPopulation());
+      return ConstantInt::get(Ty, Op->getValue().popcount());
     case Intrinsic::bitreverse:
       return ConstantInt::get(Ty->getContext(), Op->getValue().reverseBits());
     case Intrinsic::convert_from_fp16: {
@@ -2805,9 +2801,9 @@ static Constant *ConstantFoldScalarCall2(StringRef Name,
       if (!C0)
         return Constant::getNullValue(Ty);
       if (IntrinsicID == Intrinsic::cttz)
-        return ConstantInt::get(Ty, C0->countTrailingZeros());
+        return ConstantInt::get(Ty, C0->countr_zero());
       else
-        return ConstantInt::get(Ty, C0->countLeadingZeros());
+        return ConstantInt::get(Ty, C0->countl_zero());
 
     case Intrinsic::abs:
       assert(C1 && "Must be constant int");

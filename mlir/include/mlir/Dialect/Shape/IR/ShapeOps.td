@@ -98,7 +98,7 @@ def Shape_BroadcastOp : Shape_Op<"broadcast", [Commutative, Pure]> {
   let builders = [OpBuilder<(ins "::mlir::Type":$result,
                                 "::mlir::Value":$lhs, "::mlir::Value":$rhs,
                                 "/*optional*/ ::mlir::StringAttr":$error), [{
-      build($_builder, $_state, result, ::llvm::makeArrayRef({lhs, rhs}),
+      build($_builder, $_state, result, ::llvm::ArrayRef({lhs, rhs}),
         error);
     }]>
   ];
@@ -211,7 +211,7 @@ def Shape_ShapeEqOp : Shape_Op<"shape_eq", [Pure, Commutative]> {
   // Convenience builder alias for the binary version.
   let builders = [
   OpBuilder<(ins "::mlir::Value":$lhs, "::mlir::Value":$rhs),
-    [{ build($_builder, $_state, ::llvm::makeArrayRef({lhs, rhs})); }]>,
+    [{ build($_builder, $_state, ::llvm::ArrayRef({lhs, rhs})); }]>,
   ];
 
   let assemblyFormat = "$shapes attr-dict `:` type($shapes)";
@@ -277,7 +277,7 @@ def Shape_IsBroadcastableOp : Shape_Op<"is_broadcastable", [Commutative]> {
 
   let builders = [
   OpBuilder<(ins "::mlir::Value":$lhs, "::mlir::Value":$rhs),
-    [{ build($_builder, $_state, ::llvm::makeArrayRef({lhs, rhs})); }]>,
+    [{ build($_builder, $_state, ::llvm::ArrayRef({lhs, rhs})); }]>,
   ];
 
   let hasFolder = 1;
@@ -972,7 +972,7 @@ def Shape_CstrBroadcastableOp : Shape_Op<"cstr_broadcastable", [Commutative]> {
 
   let builders = [
   OpBuilder<(ins "::mlir::Value":$lhs, "::mlir::Value":$rhs),
-    [{ build($_builder, $_state, ::llvm::makeArrayRef({lhs, rhs})); }]>,
+    [{ build($_builder, $_state, ::llvm::ArrayRef({lhs, rhs})); }]>,
   ];
 
   let hasCanonicalizer = 1;
@@ -1103,7 +1103,7 @@ def Shape_FunctionLibraryOp : Shape_Op<"function_library",
 
 def Shape_FuncOp : Shape_Op<"func",
     [AffineScope, AutomaticAllocationScope, CallableOpInterface,
-     FunctionOpInterface, IsolatedFromAbove, OpAsmOpInterface, Symbol]> {
+     FunctionOpInterface, IsolatedFromAbove, OpAsmOpInterface]> {
   let summary = "Shape function";
   let description = [{
     An operation with a name containing a single `SSACFG` region which

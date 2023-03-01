@@ -171,8 +171,9 @@ public:
     return false;
   }
 
-  PredicationStyle emitGetActiveLaneMask() const {
-    return PredicationStyle::None;
+  TailFoldingStyle
+  getPreferredTailFoldingStyle(bool IVUpdateMayOverflow = true) const {
+    return TailFoldingStyle::DataWithoutLaneMask;
   }
 
   std::optional<Instruction *> instCombineIntrinsic(InstCombiner &IC,
@@ -333,12 +334,15 @@ public:
 
   InstructionCost getScalarizationOverhead(VectorType *Ty,
                                            const APInt &DemandedElts,
-                                           bool Insert, bool Extract) const {
+                                           bool Insert, bool Extract,
+                                           TTI::TargetCostKind CostKind) const {
     return 0;
   }
 
-  InstructionCost getOperandsScalarizationOverhead(ArrayRef<const Value *> Args,
-                                                   ArrayRef<Type *> Tys) const {
+  InstructionCost
+  getOperandsScalarizationOverhead(ArrayRef<const Value *> Args,
+                                   ArrayRef<Type *> Tys,
+                                   TTI::TargetCostKind CostKind) const {
     return 0;
   }
 
@@ -488,7 +492,7 @@ public:
   bool enableWritePrefetching() const { return false; }
   bool shouldPrefetchAddressSpace(unsigned AS) const { return !AS; }
 
-  unsigned getMaxInterleaveFactor(unsigned VF) const { return 1; }
+  unsigned getMaxInterleaveFactor(ElementCount VF) const { return 1; }
 
   InstructionCost getArithmeticInstrCost(
       unsigned Opcode, Type *Ty, TTI::TargetCostKind CostKind,
@@ -555,7 +559,7 @@ public:
       // trunc to a native type is free (assuming the target has compare and
       // shift-right of the same width).
       TypeSize DstSize = DL.getTypeSizeInBits(Dst);
-      if (!DstSize.isScalable() && DL.isLegalInteger(DstSize.getFixedSize()))
+      if (!DstSize.isScalable() && DL.isLegalInteger(DstSize.getFixedValue()))
         return 0;
       break;
     }
@@ -586,11 +590,14 @@ public:
   }
 
   InstructionCost getVectorInstrCost(unsigned Opcode, Type *Val,
-                                     unsigned Index) const {
+                                     TTI::TargetCostKind CostKind,
+                                     unsigned Index, Value *Op0,
+                                     Value *Op1) const {
     return 1;
   }
 
   InstructionCost getVectorInstrCost(const Instruction &I, Type *Val,
+                                     TTI::TargetCostKind CostKind,
                                      unsigned Index) const {
     return 1;
   }
@@ -856,6 +863,8 @@ public:
         /* OperatorStrategy */ TargetTransformInfo::VPLegalization::Convert);
   }
 
+  bool hasArmWideBranch(bool) const { return false; }
+
 protected:
   // Obtain the minimum required size to hold the value (without the sign)
   // In case of a vector it returns the min required size for one element.
@@ -872,7 +881,7 @@ protected:
 
       // The max required size is the size of the vector element type
       unsigned MaxRequiredSize =
-          VT->getElementType()->getPrimitiveSizeInBits().getFixedSize();
+          VT->getElementType()->getPrimitiveSizeInBits().getFixedValue();
 
       unsigned MinRequiredSize = 0;
       for (unsigned i = 0, e = VT->getNumElements(); i < e; ++i) {
@@ -881,7 +890,7 @@ protected:
           bool signedElement = IntElement->getValue().isNegative();
           // Get the element min required size.
           unsigned ElementMinRequiredSize =
-              IntElement->getValue().getMinSignedBits() - 1;
+              IntElement->getValue().getSignificantBits() - 1;
           // In case one element is signed then all the vector is signed.
           isSigned |= signedElement;
           // Save the max required bit size between all the elements.
@@ -896,7 +905,7 @@ protected:
 
     if (const auto *CI = dyn_cast<ConstantInt>(Val)) {
       isSigned = CI->getValue().isNegative();
-      return CI->getValue().getMinSignedBits() - 1;
+      return CI->getValue().getSignificantBits() - 1;
     }
 
     if (const auto *Cast = dyn_cast<SExtInst>(Val)) {
@@ -992,7 +1001,7 @@ public:
         if (isa<ScalableVectorType>(TargetType))
           return TTI::TCC_Basic;
         int64_t ElementSize =
-            DL.getTypeAllocSize(GTI.getIndexedType()).getFixedSize();
+            DL.getTypeAllocSize(GTI.getIndexedType()).getFixedValue();
         if (ConstIdx) {
           BaseOffset +=
               ConstIdx->getValue().sextOrTrunc(PtrSizeBits) * ElementSize;
@@ -1176,7 +1185,7 @@ public:
       if (auto *CI = dyn_cast<ConstantInt>(IE->getOperand(2)))
         if (CI->getValue().getActiveBits() <= 32)
           Idx = CI->getZExtValue();
-      return TargetTTI->getVectorInstrCost(*IE, Ty, Idx);
+      return TargetTTI->getVectorInstrCost(*IE, Ty, CostKind, Idx);
     }
     case Instruction::ShuffleVector: {
       auto *Shuffle = dyn_cast<ShuffleVectorInst>(U);
@@ -1207,7 +1216,7 @@ public:
         int ReplicationFactor, VF;
         if (Shuffle->isReplicationMask(ReplicationFactor, VF)) {
           APInt DemandedDstElts =
-              APInt::getNullValue(Shuffle->getShuffleMask().size());
+              APInt::getZero(Shuffle->getShuffleMask().size());
           for (auto I : enumerate(Shuffle->getShuffleMask())) {
             if (I.value() != UndefMaskElem)
               DemandedDstElts.setBit(I.index());
@@ -1272,7 +1281,7 @@ public:
         if (CI->getValue().getActiveBits() <= 32)
           Idx = CI->getZExtValue();
       Type *DstTy = U->getOperand(0)->getType();
-      return TargetTTI->getVectorInstrCost(*EEI, DstTy, Idx);
+      return TargetTTI->getVectorInstrCost(*EEI, DstTy, CostKind, Idx);
     }
     }
 

@@ -101,8 +101,6 @@ def HasFPARMv8       : Predicate<"Subtarget->hasFPARMv8()">,
                                AssemblerPredicateWithAll<(all_of FeatureFPARMv8), "fp-armv8">;
 def HasNEON          : Predicate<"Subtarget->hasNEON()">,
                                  AssemblerPredicateWithAll<(all_of FeatureNEON), "neon">;
-def HasCrypto        : Predicate<"Subtarget->hasCrypto()">,
-                                 AssemblerPredicateWithAll<(all_of FeatureCrypto), "crypto">;
 def HasSM4           : Predicate<"Subtarget->hasSM4()">,
                                  AssemblerPredicateWithAll<(all_of FeatureSM4), "sm4">;
 def HasSHA3          : Predicate<"Subtarget->hasSHA3()">,
@@ -362,8 +360,10 @@ def SDT_AArch64TLSDescCall : SDTypeProfile<0, -2, [SDTCisPtrTy<0>,
 def SDT_AArch64uaddlp : SDTypeProfile<1, 1, [SDTCisVec<0>, SDTCisVec<1>]>;
 
 def SDT_AArch64ldp : SDTypeProfile<2, 1, [SDTCisVT<0, i64>, SDTCisSameAs<0, 1>, SDTCisPtrTy<2>]>;
+def SDT_AArch64ldiapp : SDTypeProfile<2, 1, [SDTCisVT<0, i64>, SDTCisSameAs<0, 1>, SDTCisPtrTy<2>]>;
 def SDT_AArch64ldnp : SDTypeProfile<2, 1, [SDTCisVT<0, v4i32>, SDTCisSameAs<0, 1>, SDTCisPtrTy<2>]>;
 def SDT_AArch64stp : SDTypeProfile<0, 3, [SDTCisVT<0, i64>, SDTCisSameAs<0, 1>, SDTCisPtrTy<2>]>;
+def SDT_AArch64stilp : SDTypeProfile<0, 3, [SDTCisVT<0, i64>, SDTCisSameAs<0, 1>, SDTCisPtrTy<2>]>;
 def SDT_AArch64stnp : SDTypeProfile<0, 3, [SDTCisVT<0, v4i32>, SDTCisSameAs<0, 1>, SDTCisPtrTy<2>]>;
 
 // Generates the general dynamic sequences, i.e.
@@ -550,6 +550,16 @@ def top16Zero: PatLeaf<(i32 GPR32:$src), [{
 def top32Zero: PatLeaf<(i64 GPR64:$src), [{
   return SDValue(N,0)->getValueType(0) == MVT::i64 &&
          CurDAG->MaskedValueIsZero(SDValue(N,0), APInt::getHighBitsSet(64, 32));
+  }]>;
+
+// topbitsallzero - Return true if all bits except the lowest bit are known zero
+def topbitsallzero32: PatLeaf<(i32 GPR32:$src), [{
+  return SDValue(N,0)->getValueType(0) == MVT::i32 &&
+         CurDAG->MaskedValueIsZero(SDValue(N,0), APInt::getHighBitsSet(32, 31));
+  }]>;
+def topbitsallzero64: PatLeaf<(i64 GPR64:$src), [{
+  return SDValue(N,0)->getValueType(0) == MVT::i64 &&
+         CurDAG->MaskedValueIsZero(SDValue(N,0), APInt::getHighBitsSet(64, 63));
   }]>;
 
 // Node definitions.
@@ -776,8 +786,10 @@ def AArch64uunpkhi : SDNode<"AArch64ISD::UUNPKHI", SDT_AArch64unpk>;
 def AArch64uunpklo : SDNode<"AArch64ISD::UUNPKLO", SDT_AArch64unpk>;
 
 def AArch64ldp : SDNode<"AArch64ISD::LDP", SDT_AArch64ldp, [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
+def AArch64ldiapp : SDNode<"AArch64ISD::LDIAPP", SDT_AArch64ldiapp, [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 def AArch64ldnp : SDNode<"AArch64ISD::LDNP", SDT_AArch64ldnp, [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 def AArch64stp : SDNode<"AArch64ISD::STP", SDT_AArch64stp, [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
+def AArch64stilp : SDNode<"AArch64ISD::STILP", SDT_AArch64stilp, [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 def AArch64stnp : SDNode<"AArch64ISD::STNP", SDT_AArch64stnp, [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 
 def AArch64tbl : SDNode<"AArch64ISD::TBL", SDT_AArch64TBL>;
@@ -2464,6 +2476,20 @@ def : Pat<(add GPR32:$val, (AArch64csel (i32 0), (i32 1), (i32 imm:$cc), NZCV)),
 def : Pat<(add GPR64:$val, (zext (AArch64csel (i32 0), (i32 1), (i32 imm:$cc), NZCV))),
           (CSINCXr GPR64:$val, GPR64:$val, (i32 imm:$cc))>;
 
+def : Pat<(or (topbitsallzero32:$val), (AArch64csel (i32 0), (i32 1), (i32 imm:$cc), NZCV)),
+          (CSINCWr GPR32:$val, WZR, imm:$cc)>;
+def : Pat<(or (topbitsallzero64:$val), (AArch64csel (i64 0), (i64 1), (i32 imm:$cc), NZCV)),
+          (CSINCXr GPR64:$val, XZR, imm:$cc)>;
+def : Pat<(or (topbitsallzero64:$val), (zext (AArch64csel (i32 0), (i32 1), (i32 imm:$cc), NZCV))),
+          (CSINCXr GPR64:$val, XZR, imm:$cc)>;
+
+def : Pat<(and (topbitsallzero32:$val), (AArch64csel (i32 0), (i32 1), (i32 imm:$cc), NZCV)),
+          (CSELWr WZR, GPR32:$val, imm:$cc)>;
+def : Pat<(and (topbitsallzero64:$val), (AArch64csel (i64 0), (i64 1), (i32 imm:$cc), NZCV)),
+          (CSELXr XZR, GPR64:$val, imm:$cc)>;
+def : Pat<(and (topbitsallzero64:$val), (zext (AArch64csel (i32 0), (i32 1), (i32 imm:$cc), NZCV))),
+          (CSELXr XZR, GPR64:$val, imm:$cc)>;
+
 // The inverse of the condition code from the alias instruction is what is used
 // in the aliased instruction. The parser all ready inverts the condition code
 // for these aliases.
@@ -2552,6 +2578,9 @@ def : Pat<(AArch64call_rvmarker (i64 tglobaladdr:$rvfunc), GPR64:$Rn),
 def : Pat<(AArch64call_bti GPR64:$Rn),
           (BLR_BTI GPR64:$Rn)>,
       Requires<[NoSLSBLRMitigation]>;
+def : Pat<(AArch64call_bti GPR64noip:$Rn),
+          (BLR_BTI GPR64noip:$Rn)>,
+      Requires<[SLSBLRMitigation]>;
 
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in {
 def BR  : BranchReg<0b0000, "br", [(brind GPR64:$Rn)]>;
@@ -2586,7 +2615,7 @@ def EMITMTETAGGED : Pseudo<(outs), (ins), []>, Sched<[]> {}
 // FIXME: maybe the scratch register used shouldn't be fixed to X1?
 // FIXME: can "hasSideEffects be dropped?
 // This gets lowered to an instruction sequence which takes 16 bytes
-let isCall = 1, Defs = [LR, X0, X1], hasSideEffects = 1, Size = 16,
+let isCall = 1, Defs = [NZCV, LR, X0, X1], hasSideEffects = 1, Size = 16,
     isCodeGenOnly = 1 in
 def TLSDESC_CALLSEQ
     : Pseudo<(outs), (ins i64imm:$sym),
@@ -3291,6 +3320,48 @@ def : InstAlias<"ldrsh $Rt, [$Rn, $offset]",
 def : InstAlias<"ldrsw $Rt, [$Rn, $offset]",
                 (LDURSWi GPR64:$Rt, GPR64sp:$Rn, simm9_offset_fb32:$offset), 0>;
 
+// A LDR will implicitly zero the rest of the vector, so vector_insert(zeros,
+// load, 0) can use a single load.
+multiclass LoadInsertZeroPatterns<SDPatternOperator LoadOp, ValueType VT, ValueType HVT, ValueType ScalarVT,
+                                  Instruction LoadInst, Instruction UnscaledLoadInst,
+                                  ComplexPattern Addr, ComplexPattern UnscaledAddr, Operand AddrImm,
+                                  SubRegIndex SubReg> {
+  // Scaled
+  def : Pat <(vector_insert (VT immAllZerosV),
+                (ScalarVT (LoadOp (Addr GPR64sp:$Rn, AddrImm:$offset))), (i64 0)),
+            (SUBREG_TO_REG (i64 0), (LoadInst GPR64sp:$Rn, AddrImm:$offset), SubReg)>;
+  // Unscaled
+  def : Pat <(vector_insert (VT immAllZerosV),
+                 (ScalarVT (LoadOp (UnscaledAddr GPR64sp:$Rn, simm9:$offset))), (i64 0)),
+             (SUBREG_TO_REG (i64 0), (UnscaledLoadInst GPR64sp:$Rn, simm9:$offset), SubReg)>;
+
+  // Half-vector patterns
+  def : Pat <(vector_insert (HVT immAllZerosV),
+                 (ScalarVT (LoadOp (Addr GPR64sp:$Rn, AddrImm:$offset))), (i64 0)),
+             (SUBREG_TO_REG (i64 0), (LoadInst GPR64sp:$Rn, AddrImm:$offset), SubReg)>;
+  // Unscaled
+  def : Pat <(vector_insert (HVT immAllZerosV),
+                 (ScalarVT (LoadOp (UnscaledAddr GPR64sp:$Rn, simm9:$offset))), (i64 0)),
+             (SUBREG_TO_REG (i64 0), (UnscaledLoadInst GPR64sp:$Rn, simm9:$offset), SubReg)>;
+}
+
+defm : LoadInsertZeroPatterns<extloadi8,  v16i8,  v8i8,   i32,  LDRBui, LDRBui,
+                              am_indexed8,  am_unscaled8,  uimm12s1, bsub>;
+defm : LoadInsertZeroPatterns<extloadi16, v8i16,  v4i16,  i32,  LDRHui, LDURHi,
+                              am_indexed16, am_unscaled16, uimm12s2, hsub>;
+defm : LoadInsertZeroPatterns<load,       v4i32,  v2i32,  i32,  LDRSui, LDURSi,
+                              am_indexed32, am_unscaled32, uimm12s4, ssub>;
+defm : LoadInsertZeroPatterns<load,       v2i64,  v1i64,  i64,  LDRDui, LDURDi,
+                              am_indexed64, am_unscaled64, uimm12s8, dsub>;
+defm : LoadInsertZeroPatterns<load,       v8f16,  v4f16,  f16,  LDRHui, LDURHi,
+                              am_indexed16, am_unscaled16, uimm12s2, hsub>;
+defm : LoadInsertZeroPatterns<load,       v8bf16, v4bf16, bf16, LDRHui, LDURHi,
+                              am_indexed16, am_unscaled16, uimm12s2, hsub>;
+defm : LoadInsertZeroPatterns<load,       v4f32,  v2f32,  f32,  LDRSui, LDURSi,
+                              am_indexed32, am_unscaled32, uimm12s4, ssub>;
+defm : LoadInsertZeroPatterns<load,       v2f64,  v1f64,  f64,  LDRDui, LDURDi,
+                              am_indexed64, am_unscaled64, uimm12s8, dsub>;
+
 // Pre-fetch.
 defm PRFUM : PrefetchUnscaled<0b11, 0, 0b10, "prfum",
                   [(AArch64Prefetch timm:$Rt,
@@ -3384,7 +3455,7 @@ def STPSpre : StorePairPreIdx<0b00, 1, FPR32Op, simm7s4, "stp">;
 def STPDpre : StorePairPreIdx<0b01, 1, FPR64Op, simm7s8, "stp">;
 def STPQpre : StorePairPreIdx<0b10, 1, FPR128Op, simm7s16, "stp">;
 
-// Pair (pre-indexed)
+// Pair (post-indexed)
 def STPWpost : StorePairPostIdx<0b00, 0, GPR32z, simm7s4, "stp">;
 def STPXpost : StorePairPostIdx<0b10, 0, GPR64z, simm7s8, "stp">;
 def STPSpost : StorePairPostIdx<0b00, 1, FPR32Op, simm7s4, "stp">;
@@ -4175,7 +4246,7 @@ defm FMOV : UnscaledConversion<"fmov">;
 // Add pseudo ops for FMOV 0 so we can mark them as isReMaterializable
 let isReMaterializable = 1, isCodeGenOnly = 1, isAsCheapAsAMove = 1 in {
 def FMOVH0 : Pseudo<(outs FPR16:$Rd), (ins), [(set f16:$Rd, (fpimm0))]>,
-    Sched<[WriteF]>, Requires<[HasFullFP16]>;
+    Sched<[WriteF]>;
 def FMOVS0 : Pseudo<(outs FPR32:$Rd), (ins), [(set f32:$Rd, (fpimm0))]>,
     Sched<[WriteF]>;
 def FMOVD0 : Pseudo<(outs FPR64:$Rd), (ins), [(set f64:$Rd, (fpimm0))]>,
@@ -5843,6 +5914,10 @@ def : Pat<(v8i8 (scalar_to_vector GPR32:$Rn)),
           (SUBREG_TO_REG (i32 0),
                          (f32 (COPY_TO_REGCLASS GPR32:$Rn, FPR32)), ssub)>;
 
+// The top bits will be zero from the FMOVWSr
+def : Pat<(v8i8 (bitconvert (i64 (zext GPR32:$Rn)))),
+          (SUBREG_TO_REG (i32 0), (f32 (FMOVWSr GPR32:$Rn)), ssub)>;
+
 def : Pat<(v8i16 (scalar_to_vector GPR32:$Rn)),
           (SUBREG_TO_REG (i32 0),
                          (f32 (COPY_TO_REGCLASS GPR32:$Rn, FPR32)), ssub)>;
@@ -5899,14 +5974,15 @@ def : Pat<(v4f16 (vector_insert (v4f16 V64:$Rn),
               (i64 0)),
             dsub)>;
 
-def : Pat<(vector_insert (v8f16 v8f16:$Rn), (f16 fpimm0),
-            (i64 VectorIndexH:$imm)),
+def : Pat<(vector_insert (v8f16 V128:$Rn), (f16 fpimm0), (i64 VectorIndexH:$imm)),
           (INSvi16gpr V128:$Rn, VectorIndexH:$imm, WZR)>;
-def : Pat<(vector_insert v4f32:$Rn, (f32 fpimm0),
-            (i64 VectorIndexS:$imm)),
+def : Pat<(vector_insert (v4f16 V64:$Rn), (f16 fpimm0), (i64 VectorIndexH:$imm)),
+          (EXTRACT_SUBREG (INSvi16gpr (v8f16 (INSERT_SUBREG (v8f16 (IMPLICIT_DEF)), V64:$Rn, dsub)), VectorIndexH:$imm, WZR), dsub)>;
+def : Pat<(vector_insert (v4f32 V128:$Rn), (f32 fpimm0), (i64 VectorIndexS:$imm)),
           (INSvi32gpr V128:$Rn, VectorIndexS:$imm, WZR)>;
-def : Pat<(vector_insert v2f64:$Rn, (f64 fpimm0),
-            (i64 VectorIndexD:$imm)),
+def : Pat<(vector_insert (v2f32 V64:$Rn), (f32 fpimm0), (i64 VectorIndexS:$imm)),
+          (EXTRACT_SUBREG (INSvi32gpr (v4f32 (INSERT_SUBREG (v4f32 (IMPLICIT_DEF)), V64:$Rn, dsub)), VectorIndexS:$imm, WZR), dsub)>;
+def : Pat<(vector_insert v2f64:$Rn, (f64 fpimm0), (i64 VectorIndexD:$imm)),
           (INSvi64gpr V128:$Rn, VectorIndexS:$imm, XZR)>;
 
 def : Pat<(v8f16 (vector_insert (v8f16 V128:$Rn),
@@ -5954,6 +6030,22 @@ def : Pat<(v2f64 (vector_insert (v2f64 V128:$Rn),
             V128:$Rn, VectorIndexD:$imm,
             (v2f64 (INSERT_SUBREG (v2f64 (IMPLICIT_DEF)), FPR64:$Rm, dsub)),
             (i64 0))>;
+
+def : Pat<(v2i32 (vector_insert (v2i32 V64:$Rn), (i32 GPR32:$Rm), (i64 VectorIndexS:$imm))),
+          (EXTRACT_SUBREG
+            (INSvi32gpr (v4i32 (INSERT_SUBREG (v4i32 (IMPLICIT_DEF)), V64:$Rn, dsub)),
+                        VectorIndexS:$imm, GPR32:$Rm),
+            dsub)>;
+def : Pat<(v4i16 (vector_insert (v4i16 V64:$Rn), (i32 GPR32:$Rm), (i64 VectorIndexH:$imm))),
+          (EXTRACT_SUBREG
+            (INSvi16gpr (v8i16 (INSERT_SUBREG (v8i16 (IMPLICIT_DEF)), V64:$Rn, dsub)),
+                        VectorIndexH:$imm, GPR32:$Rm),
+            dsub)>;
+def : Pat<(v8i8 (vector_insert (v8i8 V64:$Rn), (i32 GPR32:$Rm), (i64 VectorIndexB:$imm))),
+          (EXTRACT_SUBREG
+            (INSvi8gpr (v16i8 (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)), V64:$Rn, dsub)),
+                       VectorIndexB:$imm, GPR32:$Rm),
+            dsub)>;
 
 // Copy an element at a constant index in one vector into a constant indexed
 // element of another.
@@ -6018,10 +6110,20 @@ defm : Neon_INS_elt_pattern<v8bf16, v4bf16, bf16, INSvi16lane>;
 defm : Neon_INS_elt_pattern<v4f32, v2f32, f32, INSvi32lane>;
 defm : Neon_INS_elt_pattern<v2f64, v1f64, f64, INSvi64lane>;
 
+defm : Neon_INS_elt_pattern<v16i8, v8i8, i32, INSvi8lane>;
+defm : Neon_INS_elt_pattern<v8i16, v4i16, i32, INSvi16lane>;
+defm : Neon_INS_elt_pattern<v4i32, v2i32, i32, INSvi32lane>;
+defm : Neon_INS_elt_pattern<v2i64, v1i64, i64, INSvi64lane>;
+
 // Insert from bitcast
 // vector_insert(bitcast(f32 src), n, lane) -> INSvi32lane(src, lane, INSERT_SUBREG(-, n), 0)
 def : Pat<(v4i32 (vector_insert v4i32:$src, (i32 (bitconvert (f32 FPR32:$Sn))), imm:$Immd)),
           (INSvi32lane V128:$src, imm:$Immd, (INSERT_SUBREG (IMPLICIT_DEF), FPR32:$Sn, ssub), 0)>;
+def : Pat<(v2i32 (vector_insert v2i32:$src, (i32 (bitconvert (f32 FPR32:$Sn))), imm:$Immd)),
+          (EXTRACT_SUBREG
+            (INSvi32lane (v4i32 (INSERT_SUBREG (v4i32 (IMPLICIT_DEF)), V64:$src, dsub)),
+                         imm:$Immd, (INSERT_SUBREG (IMPLICIT_DEF), FPR32:$Sn, ssub), 0),
+            dsub)>;
 def : Pat<(v2i64 (vector_insert v2i64:$src, (i64 (bitconvert (f64 FPR64:$Sn))), imm:$Immd)),
           (INSvi64lane V128:$src, imm:$Immd, (INSERT_SUBREG (IMPLICIT_DEF), FPR64:$Sn, dsub), 0)>;
 
@@ -6414,6 +6516,10 @@ def : Pat<(v2i64 immAllZerosV), (MOVIv2d_ns (i32 0))>;
 def : Pat<(v4i32 immAllZerosV), (MOVIv2d_ns (i32 0))>;
 def : Pat<(v8i16 immAllZerosV), (MOVIv2d_ns (i32 0))>;
 def : Pat<(v16i8 immAllZerosV), (MOVIv2d_ns (i32 0))>;
+def : Pat<(v2f64 immAllZerosV), (MOVIv2d_ns (i32 0))>;
+def : Pat<(v4f32 immAllZerosV), (MOVIv2d_ns (i32 0))>;
+def : Pat<(v8f16 immAllZerosV), (MOVIv2d_ns (i32 0))>;
+def : Pat<(v8bf16 immAllZerosV), (MOVIv2d_ns (i32 0))>;
 
 def : Pat<(v2i64 immAllOnesV), (MOVIv2d_ns (i32 255))>;
 def : Pat<(v4i32 immAllOnesV), (MOVIv2d_ns (i32 255))>;
@@ -6426,6 +6532,10 @@ def : Pat<(v1i64 immAllZerosV), (EXTRACT_SUBREG (MOVIv2d_ns (i32 0)), dsub)>;
 def : Pat<(v2i32 immAllZerosV), (EXTRACT_SUBREG (MOVIv2d_ns (i32 0)), dsub)>;
 def : Pat<(v4i16 immAllZerosV), (EXTRACT_SUBREG (MOVIv2d_ns (i32 0)), dsub)>;
 def : Pat<(v8i8  immAllZerosV), (EXTRACT_SUBREG (MOVIv2d_ns (i32 0)), dsub)>;
+def : Pat<(v1f64 immAllZerosV), (MOVID (i32 0))>;
+def : Pat<(v2f32 immAllZerosV), (MOVID (i32 0))>;
+def : Pat<(v4f16 immAllZerosV), (MOVID (i32 0))>;
+def : Pat<(v4bf16 immAllZerosV), (MOVID (i32 0))>;
 
 def : Pat<(v1i64 immAllOnesV), (EXTRACT_SUBREG (MOVIv2d_ns (i32 255)), dsub)>;
 def : Pat<(v2i32 immAllOnesV), (EXTRACT_SUBREG (MOVIv2d_ns (i32 255)), dsub)>;
@@ -7201,6 +7311,22 @@ def : Pat<(v2i64 (AArch64dup (i64 (load GPR64sp:$Rn)))),
           (LD1Rv2d GPR64sp:$Rn)>;
 def : Pat<(v1i64 (AArch64dup (i64 (load GPR64sp:$Rn)))),
           (LD1Rv1d GPR64sp:$Rn)>;
+
+def : Pat<(v8i8 (AArch64duplane8 (v16i8 (insert_subvector undef, (v8i8 (load GPR64sp:$Rn)), (i64 0))), (i64 0))),
+          (LD1Rv8b GPR64sp:$Rn)>;
+def : Pat<(v16i8 (AArch64duplane8 (v16i8 (load GPR64sp:$Rn)), (i64 0))),
+          (LD1Rv16b GPR64sp:$Rn)>;
+def : Pat<(v4i16 (AArch64duplane16 (v8i16 (insert_subvector undef, (v4i16 (load GPR64sp:$Rn)), (i64 0))), (i64 0))),
+          (LD1Rv4h GPR64sp:$Rn)>;
+def : Pat<(v8i16 (AArch64duplane16 (v8i16 (load GPR64sp:$Rn)), (i64 0))),
+          (LD1Rv8h GPR64sp:$Rn)>;
+def : Pat<(v2i32 (AArch64duplane32 (v4i32 (insert_subvector undef, (v2i32 (load GPR64sp:$Rn)), (i64 0))), (i64 0))),
+          (LD1Rv2s GPR64sp:$Rn)>;
+def : Pat<(v4i32 (AArch64duplane32 (v4i32 (load GPR64sp:$Rn)), (i64 0))),
+          (LD1Rv4s GPR64sp:$Rn)>;
+def : Pat<(v2i64 (AArch64duplane64 (v2i64 (load GPR64sp:$Rn)), (i64 0))),
+          (LD1Rv2d GPR64sp:$Rn)>;
+
 // Grab the floating point version too
 def : Pat<(v2f32 (AArch64dup (f32 (load GPR64sp:$Rn)))),
           (LD1Rv2s GPR64sp:$Rn)>;
@@ -7242,11 +7368,21 @@ def : Ld1Lane128Pat<load,       VectorIndexH, v8bf16, bf16, LD1i16>;
 // In this case, the index must be adjusted to match LD1 type.
 //
 class Ld1Lane128IdxOpPat<SDPatternOperator scalar_load, Operand
-                    VecIndex, ValueType VTy, ValueType STy,
-                    Instruction LD1, SDNodeXForm IdxOp>
+                         VecIndex, ValueType VTy, ValueType STy,
+                         Instruction LD1, SDNodeXForm IdxOp>
   : Pat<(vector_insert (VTy VecListOne128:$Rd),
                        (STy (scalar_load GPR64sp:$Rn)), VecIndex:$idx),
         (LD1 VecListOne128:$Rd, (IdxOp VecIndex:$idx), GPR64sp:$Rn)>;
+
+class Ld1Lane64IdxOpPat<SDPatternOperator scalar_load, Operand VecIndex,
+                        ValueType VTy, ValueType STy, Instruction LD1,
+                        SDNodeXForm IdxOp>
+  : Pat<(vector_insert (VTy VecListOne64:$Rd),
+                       (STy (scalar_load GPR64sp:$Rn)), VecIndex:$idx),
+        (EXTRACT_SUBREG
+            (LD1 (SUBREG_TO_REG (i32 0), VecListOne64:$Rd, dsub),
+                (IdxOp VecIndex:$idx), GPR64sp:$Rn),
+            dsub)>;
 
 def VectorIndexStoH : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(N->getZExtValue() * 2, SDLoc(N), MVT::i64);
@@ -7261,6 +7397,10 @@ def VectorIndexHtoB : SDNodeXForm<imm, [{
 def : Ld1Lane128IdxOpPat<extloadi16, VectorIndexS, v4i32, i32, LD1i16, VectorIndexStoH>;
 def : Ld1Lane128IdxOpPat<extloadi8, VectorIndexS, v4i32, i32, LD1i8, VectorIndexStoB>;
 def : Ld1Lane128IdxOpPat<extloadi8, VectorIndexH, v8i16, i32, LD1i8, VectorIndexHtoB>;
+
+def : Ld1Lane64IdxOpPat<extloadi16, VectorIndexS, v2i32, i32, LD1i16, VectorIndexStoH>;
+def : Ld1Lane64IdxOpPat<extloadi8, VectorIndexS, v2i32, i32, LD1i8, VectorIndexStoB>;
+def : Ld1Lane64IdxOpPat<extloadi8, VectorIndexH, v4i16, i32, LD1i8, VectorIndexHtoB>;
 
 // Same as above, but the first element is populated using
 // scalar_to_vector + insert_subvector instead of insert_vector_elt.
@@ -8655,6 +8795,9 @@ let Predicates = [HasRCPC3] in {
   def LDIAPPXpre: BaseLRCPC3IntegerLoadStorePair<0b11, 0b01, 0b0000, (outs GPR64sp:$wback, GPR64:$Rt, GPR64:$Rt2), (ins GPR64sp:$Rn), "ldiapp", "\t$Rt, $Rt2, [$Rn], #16", "$Rn = $wback">;
   def LDIAPPW:    BaseLRCPC3IntegerLoadStorePair<0b10, 0b01, 0b0001, (outs GPR32:$Rt, GPR32:$Rt2), (ins GPR64sp0:$Rn), "ldiapp", "\t$Rt, $Rt2, [$Rn]", "">;
   def LDIAPPX:    BaseLRCPC3IntegerLoadStorePair<0b11, 0b01, 0b0001, (outs GPR64:$Rt, GPR64:$Rt2), (ins GPR64sp0:$Rn), "ldiapp", "\t$Rt, $Rt2, [$Rn]", "">;
+
+  def : Pat<(AArch64ldiapp GPR64sp:$Rn), (LDIAPPX GPR64sp:$Rn)>;
+  def : Pat<(AArch64stilp GPR64:$Rt, GPR64:$Rt2, GPR64sp:$Rn), (STILPX GPR64:$Rt, GPR64:$Rt2, GPR64sp:$Rn)>;
 
   // Aliases for when offset=0
   def : InstAlias<"stilp\t$Rt, $Rt2, [$Rn, #0]", (STILPW GPR32: $Rt, GPR32: $Rt2, GPR64sp:$Rn)>;

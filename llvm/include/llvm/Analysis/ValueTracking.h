@@ -98,6 +98,13 @@ KnownBits computeKnownBits(const Value *V, const APInt &DemandedElts,
 /// \p KnownOne the set of bits that are known to be one
 void computeKnownBitsFromRangeMetadata(const MDNode &Ranges, KnownBits &Known);
 
+/// Using KnownBits LHS/RHS produce the known bits for logic op (and/xor/or).
+KnownBits analyzeKnownBitsFromAndXorOr(
+    const Operator *I, const KnownBits &KnownLHS, const KnownBits &KnownRHS,
+    unsigned Depth, const DataLayout &DL, AssumptionCache *AC = nullptr,
+    const Instruction *CxtI = nullptr, const DominatorTree *DT = nullptr,
+    OptimizationRemarkEmitter *ORE = nullptr, bool UseInstrInfo = true);
+
 /// Return true if LHS and RHS have no common bits set.
 bool haveNoCommonBitsSet(const Value *LHS, const Value *RHS,
                          const DataLayout &DL, AssumptionCache *AC = nullptr,
@@ -649,16 +656,18 @@ bool programUndefinedIfPoison(const Instruction *Inst);
 /// true. If Op raises immediate UB but never creates poison or undef
 /// (e.g. sdiv I, 0), canCreatePoison returns false.
 ///
-/// \p ConsiderFlags controls whether poison producing flags on the
-/// instruction are considered.  This can be used to see if the instruction
-/// could still introduce undef or poison even without poison generating flags
-/// which might be on the instruction.  (i.e. could the result of
-/// Op->dropPoisonGeneratingFlags() still create poison or undef)
+/// \p ConsiderFlagsAndMetadata controls whether poison producing flags and
+/// metadata on the instruction are considered.  This can be used to see if the
+/// instruction could still introduce undef or poison even without poison
+/// generating flags and metadata which might be on the instruction.
+/// (i.e. could the result of Op->dropPoisonGeneratingFlags() still create
+/// poison or undef)
 ///
 /// canCreatePoison returns true if Op can create poison from non-poison
 /// operands.
-bool canCreateUndefOrPoison(const Operator *Op, bool ConsiderFlags = true);
-bool canCreatePoison(const Operator *Op, bool ConsiderFlags = true);
+bool canCreateUndefOrPoison(const Operator *Op,
+                            bool ConsiderFlagsAndMetadata = true);
+bool canCreatePoison(const Operator *Op, bool ConsiderFlagsAndMetadata = true);
 
 /// Return true if V is poison given that ValAssumedPoison is already poison.
 /// For example, if ValAssumedPoison is `icmp X, 10` and V is `icmp X, 5`,

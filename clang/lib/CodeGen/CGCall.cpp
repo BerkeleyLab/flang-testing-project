@@ -25,7 +25,6 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/Basic/CodeGenOptions.h"
-#include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
 #include "clang/CodeGen/SwiftCallingConv.h"
@@ -322,7 +321,9 @@ CodeGenTypes::arrangeCXXStructorDeclaration(GlobalDecl GD) {
 
   SmallVector<CanQualType, 16> argTypes;
   SmallVector<FunctionProtoType::ExtParameterInfo, 16> paramInfos;
-  argTypes.push_back(DeriveThisType(MD->getParent(), MD));
+
+  const CXXRecordDecl *ThisType = TheCXXABI.getThisArgumentTypeForMethod(GD);
+  argTypes.push_back(DeriveThisType(ThisType, MD));
 
   bool PassParams = true;
 
@@ -1148,7 +1149,7 @@ static Address CreateTempAllocaForCoercion(CodeGenFunction &CGF, llvm::Type *Ty,
                                            CharUnits MinAlign,
                                            const Twine &Name = "tmp") {
   // Don't use an alignment that's worse than what LLVM would prefer.
-  auto PrefAlign = CGF.CGM.getDataLayout().getPrefTypeAlignment(Ty);
+  auto PrefAlign = CGF.CGM.getDataLayout().getPrefTypeAlign(Ty);
   CharUnits Align = std::max(MinAlign, CharUnits::fromQuantity(PrefAlign));
 
   return CGF.CreateTempAlloca(Ty, Align, Name + ".coerce");
@@ -1261,7 +1262,7 @@ static llvm::Value *CreateCoercedLoad(Address Src, llvm::Type *Ty,
 
   if (llvm::StructType *SrcSTy = dyn_cast<llvm::StructType>(SrcTy)) {
     Src = EnterStructPointerForCoercedAccess(Src, SrcSTy,
-                                             DstSize.getFixedSize(), CGF);
+                                             DstSize.getFixedValue(), CGF);
     SrcTy = Src.getElementType();
   }
 
@@ -1277,7 +1278,7 @@ static llvm::Value *CreateCoercedLoad(Address Src, llvm::Type *Ty,
 
   // If load is legal, just bitcast the src pointer.
   if (!SrcSize.isScalable() && !DstSize.isScalable() &&
-      SrcSize.getFixedSize() >= DstSize.getFixedSize()) {
+      SrcSize.getFixedValue() >= DstSize.getFixedValue()) {
     // Generally SrcSize is never greater than DstSize, since this means we are
     // losing bits. However, this can happen in cases where the structure has
     // additional padding, for example due to a user specified alignment.
@@ -1323,7 +1324,7 @@ static llvm::Value *CreateCoercedLoad(Address Src, llvm::Type *Ty,
   CGF.Builder.CreateMemCpy(
       Tmp.getPointer(), Tmp.getAlignment().getAsAlign(), Src.getPointer(),
       Src.getAlignment().getAsAlign(),
-      llvm::ConstantInt::get(CGF.IntPtrTy, SrcSize.getKnownMinSize()));
+      llvm::ConstantInt::get(CGF.IntPtrTy, SrcSize.getKnownMinValue()));
   return CGF.Builder.CreateLoad(Tmp);
 }
 
@@ -1366,7 +1367,7 @@ static void CreateCoercedStore(llvm::Value *Src,
 
   if (llvm::StructType *DstSTy = dyn_cast<llvm::StructType>(DstTy)) {
     Dst = EnterStructPointerForCoercedAccess(Dst, DstSTy,
-                                             SrcSize.getFixedSize(), CGF);
+                                             SrcSize.getFixedValue(), CGF);
     DstTy = Dst.getElementType();
   }
 
@@ -1393,7 +1394,7 @@ static void CreateCoercedStore(llvm::Value *Src,
   // If store is legal, just bitcast the src pointer.
   if (isa<llvm::ScalableVectorType>(SrcTy) ||
       isa<llvm::ScalableVectorType>(DstTy) ||
-      SrcSize.getFixedSize() <= DstSize.getFixedSize()) {
+      SrcSize.getFixedValue() <= DstSize.getFixedValue()) {
     Dst = CGF.Builder.CreateElementBitCast(Dst, SrcTy);
     CGF.EmitAggregateStore(Src, Dst, DstIsVolatile);
   } else {
@@ -1411,7 +1412,7 @@ static void CreateCoercedStore(llvm::Value *Src,
     CGF.Builder.CreateMemCpy(
         Dst.getPointer(), Dst.getAlignment().getAsAlign(), Tmp.getPointer(),
         Tmp.getAlignment().getAsAlign(),
-        llvm::ConstantInt::get(CGF.IntPtrTy, DstSize.getFixedSize()));
+        llvm::ConstantInt::get(CGF.IntPtrTy, DstSize.getFixedValue()));
   }
 }
 
@@ -1969,11 +1970,11 @@ void CodeGenModule::getDefaultFunctionAttributes(StringRef Name,
     FuncAttrs.addAttribute(llvm::Attribute::Convergent);
   }
 
-  // TODO: NoUnwind attribute should be added for other GPU modes OpenCL, HIP,
+  // TODO: NoUnwind attribute should be added for other GPU modes HIP,
   // SYCL, OpenMP offload. AFAIK, none of them support exceptions in device
   // code.
-  if (getLangOpts().CUDA && getLangOpts().CUDAIsDevice) {
-    // Exceptions aren't supported in CUDA device code.
+  if ((getLangOpts().CUDA && getLangOpts().CUDAIsDevice) ||
+      getLangOpts().OpenCL) {
     FuncAttrs.addAttribute(llvm::Attribute::NoUnwind);
   }
 
@@ -2805,7 +2806,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
     case ABIArgInfo::IndirectAliased: {
       assert(NumIRArgs == 1);
       Address ParamAddr = Address(Fn->getArg(FirstIRArg), ConvertTypeForMem(Ty),
-                                  ArgI.getIndirectAlign());
+                                  ArgI.getIndirectAlign(), KnownNonNull);
 
       if (!hasScalarEvaluationKind(Ty)) {
         // Aggregates and complex variables are accessed by reference. All we
@@ -4725,7 +4726,7 @@ public:
 
 static unsigned getMaxVectorWidth(const llvm::Type *Ty) {
   if (auto *VT = dyn_cast<llvm::VectorType>(Ty))
-    return VT->getPrimitiveSizeInBits().getKnownMinSize();
+    return VT->getPrimitiveSizeInBits().getKnownMinValue();
   if (auto *AT = dyn_cast<llvm::ArrayType>(Ty))
     return getMaxVectorWidth(AT->getElementType());
 
@@ -5161,15 +5162,14 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
         llvm::Type *scalarType = RV.getScalarVal()->getType();
         auto scalarSize = CGM.getDataLayout().getTypeAllocSize(scalarType);
-        auto scalarAlign = CGM.getDataLayout().getPrefTypeAlignment(scalarType);
+        auto scalarAlign = CGM.getDataLayout().getPrefTypeAlign(scalarType);
 
         // Materialize to a temporary.
-        addr =
-            CreateTempAlloca(RV.getScalarVal()->getType(),
-                             CharUnits::fromQuantity(std::max(
-                                 layout->getAlignment().value(), scalarAlign)),
-                             "tmp",
-                             /*ArraySize=*/nullptr, &AllocaAddr);
+        addr = CreateTempAlloca(
+            RV.getScalarVal()->getType(),
+            CharUnits::fromQuantity(std::max(layout->getAlignment(), scalarAlign)),
+            "tmp",
+            /*ArraySize=*/nullptr, &AllocaAddr);
         tempSize = EmitLifetimeStart(scalarSize, AllocaAddr.getPointer());
 
         Builder.CreateStore(RV.getScalarVal(), addr);

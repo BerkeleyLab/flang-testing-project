@@ -83,7 +83,8 @@ struct VectorBroadcastConvert final
   LogicalResult
   matchAndRewrite(vector::BroadcastOp castOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    Type resultType = getTypeConverter()->convertType(castOp.getVectorType());
+    Type resultType =
+        getTypeConverter()->convertType(castOp.getResultVectorType());
     if (!resultType)
       return failure();
 
@@ -92,10 +93,10 @@ struct VectorBroadcastConvert final
       return success();
     }
 
-    SmallVector<Value, 4> source(castOp.getVectorType().getNumElements(),
+    SmallVector<Value, 4> source(castOp.getResultVectorType().getNumElements(),
                                  adaptor.getSource());
     rewriter.replaceOpWithNewOp<spirv::CompositeConstructOp>(
-        castOp, castOp.getVectorType(), source);
+        castOp, castOp.getResultVectorType(), source);
     return success();
   }
 };
@@ -335,7 +336,7 @@ struct VectorReductionPattern final
 
     // Reduce them.
     Value result = values.front();
-    for (Value next : llvm::makeArrayRef(values).drop_front()) {
+    for (Value next : llvm::ArrayRef(values).drop_front()) {
       switch (reduceOp.getKind()) {
 
 #define INT_AND_FLOAT_CASE(kind, iop, fop)                                     \
@@ -405,7 +406,7 @@ struct VectorShuffleOpConvert final
   LogicalResult
   matchAndRewrite(vector::ShuffleOp shuffleOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    auto oldResultType = shuffleOp.getVectorType();
+    auto oldResultType = shuffleOp.getResultVectorType();
     if (!spirv::CompositeType::isValid(oldResultType))
       return failure();
     Type newResultType = getTypeConverter()->convertType(oldResultType);

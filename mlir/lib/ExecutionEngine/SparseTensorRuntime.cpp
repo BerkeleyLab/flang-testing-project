@@ -631,6 +631,33 @@ void _mlir_ciface_getSparseTensorReaderDimSizes(
 MLIR_SPARSETENSOR_FOREVERY_V(IMPL_GETNEXT)
 #undef IMPL_GETNEXT
 
+#define IMPL_GETNEXT(VNAME, V, CNAME, C)                                       \
+  bool _mlir_ciface_getSparseTensorReaderRead##CNAME##VNAME(                   \
+      void *p, StridedMemRefType<index_type, 1> *dim2lvlRef,                   \
+      StridedMemRefType<C, 1> *cref, StridedMemRefType<V, 1> *vref) {          \
+    assert(p);                                                                 \
+    auto &reader = *static_cast<SparseTensorReader *>(p);                      \
+    ASSERT_NO_STRIDE(cref);                                                    \
+    ASSERT_NO_STRIDE(vref);                                                    \
+    ASSERT_NO_STRIDE(dim2lvlRef);                                              \
+    const uint64_t cSize = MEMREF_GET_USIZE(cref);                             \
+    const uint64_t vSize = MEMREF_GET_USIZE(vref);                             \
+    const uint64_t lvlRank = reader.getRank();                                 \
+    assert(vSize *lvlRank <= cSize);                                           \
+    assert(vSize >= reader.getNNZ() && "Not enough space in buffers");         \
+    ASSERT_USIZE_EQ(dim2lvlRef, lvlRank);                                      \
+    (void)cSize;                                                               \
+    (void)vSize;                                                               \
+    (void)lvlRank;                                                             \
+    C *lvlCoordinates = MEMREF_GET_PAYLOAD(cref);                              \
+    V *values = MEMREF_GET_PAYLOAD(vref);                                      \
+    index_type *dim2lvl = MEMREF_GET_PAYLOAD(dim2lvlRef);                      \
+    return reader.readToBuffers<C, V>(lvlRank, dim2lvl, lvlCoordinates,        \
+                                      values);                                 \
+  }
+MLIR_SPARSETENSOR_FOREVERY_V_O(IMPL_GETNEXT)
+#undef IMPL_GETNEXT
+
 void *_mlir_ciface_newSparseTensorFromReader(
     void *p, StridedMemRefType<index_type, 1> *lvlSizesRef,
     StridedMemRefType<DimLevelType, 1> *lvlTypesRef,
@@ -821,8 +848,9 @@ MLIR_SPARSETENSOR_FOREVERY_V(IMPL_DELITER)
 #undef IMPL_DELITER
 
 char *getTensorFilename(index_type id) {
-  char var[80];
-  sprintf(var, "TENSOR%" PRIu64, id);
+  constexpr size_t BUF_SIZE = 80;
+  char var[BUF_SIZE];
+  snprintf(var, BUF_SIZE, "TENSOR%" PRIu64, id);
   char *env = getenv(var);
   if (!env)
     MLIR_SPARSETENSOR_FATAL("Environment variable %s is not set\n", var);

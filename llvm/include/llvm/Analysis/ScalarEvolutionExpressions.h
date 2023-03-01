@@ -187,7 +187,7 @@ protected:
 
   SCEVNAryExpr(const FoldingSetNodeIDRef ID, enum SCEVTypes T,
                const SCEV *const *O, size_t N)
-      : SCEV(ID, T, computeExpressionSize(makeArrayRef(O, N))), Operands(O),
+      : SCEV(ID, T, computeExpressionSize(ArrayRef(O, N))), Operands(O),
         NumOperands(N) {}
 
 public:
@@ -199,7 +199,7 @@ public:
   }
 
   ArrayRef<const SCEV *> operands() const {
-    return makeArrayRef(Operands, NumOperands);
+    return ArrayRef(Operands, NumOperands);
   }
 
   NoWrapFlags getNoWrapFlags(NoWrapFlags Mask = NoWrapMask) const {
@@ -579,17 +579,8 @@ class SCEVUnknown final : public SCEV, private CallbackVH {
 public:
   Value *getValue() const { return getValPtr(); }
 
-  /// @{
-  /// Test whether this is a special constant representing a type
-  /// size, alignment, or field offset in a target-independent
-  /// manner, and hasn't happened to have been folded with other
-  /// operations into something unrecognizable. This is mainly only
-  /// useful for pretty-printing and other situations where it isn't
-  /// absolutely required for these to succeed.
-  bool isSizeOf(Type *&AllocTy) const;
-  bool isAlignOf(Type *&AllocTy) const;
-  bool isOffsetOf(Type *&STy, Constant *&FieldNo) const;
-  /// @}
+  /// Check whether this represents vscale.
+  bool isVScale() const;
 
   Type *getType() const { return getValPtr()->getType(); }
 
@@ -677,28 +668,21 @@ public:
       case scTruncate:
       case scZeroExtend:
       case scSignExtend:
-        push(cast<SCEVCastExpr>(S)->getOperand());
-        continue;
       case scAddExpr:
       case scMulExpr:
+      case scUDivExpr:
       case scSMaxExpr:
       case scUMaxExpr:
       case scSMinExpr:
       case scUMinExpr:
       case scSequentialUMinExpr:
       case scAddRecExpr:
-        for (const auto *Op : cast<SCEVNAryExpr>(S)->operands()) {
+        for (const auto *Op : S->operands()) {
           push(Op);
           if (Visitor.isDone())
             break;
         }
         continue;
-      case scUDivExpr: {
-        const SCEVUDivExpr *UDiv = cast<SCEVUDivExpr>(S);
-        push(UDiv->getLHS());
-        push(UDiv->getRHS());
-        continue;
-      }
       case scCouldNotCompute:
         llvm_unreachable("Attempt to use a SCEVCouldNotCompute object!");
       }

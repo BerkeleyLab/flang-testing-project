@@ -61,8 +61,10 @@ enum NodeType : unsigned {
   BITREV_4B,
   BITREV_W,
 
-  // Intrinsic operations
+  // Intrinsic operations start ============================================
   BREAK,
+  CACOP_D,
+  CACOP_W,
   DBAR,
   IBAR,
   SYSCALL,
@@ -93,6 +95,7 @@ enum NodeType : unsigned {
 
   // Read CPU configuration information operation
   CPUCFG,
+  // Intrinsic operations end =============================================
 };
 } // end namespace LoongArchISD
 
@@ -173,9 +176,20 @@ public:
 
   Register getRegisterByName(const char *RegName, LLT VT,
                              const MachineFunction &MF) const override;
+  bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
 
   bool decomposeMulByConstant(LLVMContext &Context, EVT VT,
                               SDValue C) const override;
+
+  bool isUsedByReturnOnly(SDNode *N, SDValue &Chain) const override;
+
+  bool isLegalAddressingMode(const DataLayout &DL, const AddrMode &AM, Type *Ty,
+                             unsigned AS,
+                             Instruction *I = nullptr) const override;
+
+  bool hasAndNotCompare(SDValue Y) const override;
+
+  bool convertSelectOfConstantsToMath(EVT VT) const override { return true; }
 
 private:
   /// Target-specific function used to lower LoongArch calling conventions.

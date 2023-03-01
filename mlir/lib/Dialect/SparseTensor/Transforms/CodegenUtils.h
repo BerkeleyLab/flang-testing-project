@@ -78,6 +78,9 @@ StringRef primaryTypeFunctionSuffix(Type elemTp);
 // Misc code generators and utilities.
 //===----------------------------------------------------------------------===//
 
+/// Add type casting between arith and index types when needed.
+Value genCast(OpBuilder &builder, Location loc, Value value, Type dstTy);
+
 /// Generates a 1-valued attribute of the given type.  This supports
 /// all the same types as `getZeroAttr`; however, unlike `getZeroAttr`,
 /// for unsupported types we raise `llvm_unreachable` rather than
@@ -128,9 +131,10 @@ Type getOpaquePointerType(OpBuilder &builder);
 Value genAlloca(OpBuilder &builder, Location loc, Value sz, Type tp);
 
 /// Generates an uninitialized temporary buffer of the given size and
-/// type, but returns it as type `memref<? x $tp>` (rather than as type
-/// `memref<$sz x $tp>`).
-Value genAlloca(OpBuilder &builder, Location loc, unsigned sz, Type tp);
+/// type, and returns it as type `memref<? x $tp>` (staticShape=false) or
+/// `memref<$sz x $tp>` (staticShape=true).
+Value genAlloca(OpBuilder &builder, Location loc, unsigned sz, Type tp,
+                bool staticShape = false);
 
 /// Generates an uninitialized temporary buffer with room for one value
 /// of the given type, and returns the `memref<$tp>`.
@@ -215,7 +219,20 @@ Operation *getTop(Operation *op);
 /// callback({%c3}, %v3)
 void foreachInSparseConstant(
     Location loc, RewriterBase &rewriter, SparseElementsAttr attr,
-    function_ref<void(ArrayRef<Value>, Value)> callback);
+    AffineMap order, function_ref<void(ArrayRef<Value>, Value)> callback);
+
+/// Converts the vector indices and store it into the memory pointed by
+/// `ind`, apply (optional) `offset` on `offsetDim`.
+void storeIndices(OpBuilder &builder, Location loc, unsigned rank, Value ind,
+                  ValueRange ivs, unsigned offsetDim = 0,
+                  Value offset = Value());
+
+/// Reshapes the linear values buffer for an annotated all dense sparse tensor
+/// to match the shape of the corresponding dense tensor to support direct
+/// access of the buffer through indices.
+Value reshapeValuesToLevels(OpBuilder &builder, Location loc,
+                            SparseTensorEncodingAttr enc, ValueRange dimSizes,
+                            Value valuesBuffer, Value idxBuffer);
 
 //===----------------------------------------------------------------------===//
 // Inlined constant generators.
@@ -258,6 +275,11 @@ inline Value constantOne(OpBuilder &builder, Location loc, Type tp) {
 /// Generates a constant of `index` type.
 inline Value constantIndex(OpBuilder &builder, Location loc, int64_t i) {
   return builder.create<arith::ConstantIndexOp>(loc, i);
+}
+
+/// Generates a constant of `i64` type.
+inline Value constantI64(OpBuilder &builder, Location loc, int64_t i) {
+  return builder.create<arith::ConstantIntOp>(loc, i, 64);
 }
 
 /// Generates a constant of `i32` type.
@@ -325,13 +347,13 @@ inline bool isZeroRankedTensorOrScalar(Type type) {
 }
 
 /// Infers the result type and generates ToPointersOp.
-Value genToPointers(OpBuilder &builder, Location loc, Value tensor, uint64_t d);
+Value genToPointers(OpBuilder &builder, Location loc, Value tensor, Level lvl);
 
-/// Infers the result type and generates ToIndicesOp. If the dim is within a COO
+/// Infers the result type and generates ToIndicesOp. If the lvl is within a COO
 /// region, the result type is a memref with unknown stride and offset.
 /// Otherwise, the result type is a memref without any specified layout.
-Value genToIndices(OpBuilder &builder, Location loc, Value tensor, uint64_t d,
-                   uint64_t cooStart);
+Value genToIndices(OpBuilder &builder, Location loc, Value tensor, Level lvl,
+                   Level cooStart);
 
 /// Infers the result type and generates ToValuesOp.
 Value genToValues(OpBuilder &builder, Location loc, Value tensor);

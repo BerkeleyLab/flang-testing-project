@@ -82,11 +82,18 @@ static LogicalResult runMLIRPasses(Operation *module,
   passManager.addPass(createGpuKernelOutliningPass());
   passManager.addPass(createConvertGPUToSPIRVPass(/*mapMemorySpace=*/true));
 
+  auto enableOpaquePointers = [](auto options) {
+    options.useOpaquePointers = true;
+    return options;
+  };
+
   OpPassManager &nestedPM = passManager.nest<spirv::ModuleOp>();
-  nestedPM.addPass(spirv::createLowerABIAttributesPass());
-  nestedPM.addPass(spirv::createUpdateVersionCapabilityExtensionPass());
-  passManager.addPass(createLowerHostCodeToLLVMPass());
-  passManager.addPass(createConvertSPIRVToLLVMPass());
+  nestedPM.addPass(spirv::createSPIRVLowerABIAttributesPass());
+  nestedPM.addPass(spirv::createSPIRVUpdateVCEPass());
+  passManager.addPass(createLowerHostCodeToLLVMPass(
+      enableOpaquePointers(LowerHostCodeToLLVMPassOptions{})));
+  passManager.addPass(createConvertSPIRVToLLVMPass(
+      enableOpaquePointers(ConvertSPIRVToLLVMPassOptions{})));
   return passManager.run(module);
 }
 

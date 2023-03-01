@@ -8,7 +8,6 @@ add_llvm_unittest(SupportTests
   AlignmentTest.cpp
   AlignOfTest.cpp
   AllocatorTest.cpp
-  AnnotationsTest.cpp
   ARMAttributeParser.cpp
   ArrayRecyclerTest.cpp
   Base64Test.cpp
@@ -47,11 +46,9 @@ add_llvm_unittest(SupportTests
   HashBuilderTest.cpp
   IndexedAccessorTest.cpp
   InstructionCostTest.cpp
-  ItaniumManglingCanonicalizerTest.cpp
   JSONTest.cpp
   KnownBitsTest.cpp
   LEB128Test.cpp
-  LinearPolyBaseTest.cpp
   LineIteratorTest.cpp
   LockFileManagerTest.cpp
   MatchersTest.cpp
@@ -71,6 +68,7 @@ add_llvm_unittest(SupportTests
   ReverseIterationTest.cpp
   ReplaceFileTest.cpp
   RISCVAttributeParserTest.cpp
+  RISCVISAInfoTest.cpp
   ScaledNumberTest.cpp
   ScopedPrinterTest.cpp
   SHA256.cpp
@@ -78,10 +76,8 @@ add_llvm_unittest(SupportTests
   SpecialCaseListTest.cpp
   SuffixTreeTest.cpp
   SwapByteOrderTest.cpp
-  SymbolRemappingReaderTest.cpp
   TarWriterTest.cpp
   TaskQueueTest.cpp
-  ThreadLocalTest.cpp
   ThreadPool.cpp
   Threading.cpp
   TimerTest.cpp

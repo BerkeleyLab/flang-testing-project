@@ -10,6 +10,7 @@
 #include "CodegenUtils.h"
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SparseTensor/IR/SparseTensor.h"
 #include "mlir/Dialect/SparseTensor/Transforms/Passes.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -21,13 +22,6 @@ using namespace sparse_tensor;
 // Private helper methods.
 //===----------------------------------------------------------------------===//
 
-static Value createIndexCast(OpBuilder &builder, Location loc, Value value,
-                             Type to) {
-  if (value.getType() != to)
-    return builder.create<arith::IndexCastOp>(loc, to, value);
-  return value;
-}
-
 static IntegerAttr fromOptionalInt(MLIRContext *ctx,
                                    std::optional<unsigned> dim) {
   if (!dim)
@@ -35,16 +29,19 @@ static IntegerAttr fromOptionalInt(MLIRContext *ctx,
   return IntegerAttr::get(IndexType::get(ctx), dim.value());
 }
 
+// This is only ever called from `SparseTensorTypeToBufferConverter`,
+// which is why the first argument is `RankedTensorType` rather than
+// `SparseTensorType`.
 static std::optional<LogicalResult>
 convertSparseTensorType(RankedTensorType rtp, SmallVectorImpl<Type> &fields) {
-  auto enc = getSparseTensorEncoding(rtp);
-  if (!enc)
+  const SparseTensorType stt(rtp);
+  if (!stt.hasEncoding())
     return std::nullopt;
 
   foreachFieldAndTypeInSparseTensor(
-      rtp,
-      [&fields](Type fieldType, unsigned fieldIdx,
-                SparseTensorFieldKind /*fieldKind*/, unsigned /*dim*/,
+      stt,
+      [&fields](Type fieldType, FieldIndex fieldIdx,
+                SparseTensorFieldKind /*fieldKind*/, Level /*lvl*/,
                 DimLevelType /*dlt*/) -> bool {
         assert(fieldIdx == fields.size());
         fields.push_back(fieldType);
@@ -59,9 +56,7 @@ convertSparseTensorType(RankedTensorType rtp, SmallVectorImpl<Type> &fields) {
 
 SparseTensorTypeToBufferConverter::SparseTensorTypeToBufferConverter() {
   addConversion([](Type type) { return type; });
-  addConversion([&](RankedTensorType rtp, SmallVectorImpl<Type> &fields) {
-    return convertSparseTensorType(rtp, fields);
-  });
+  addConversion(convertSparseTensorType);
 
   // Required by scf.for 1:N type conversion.
   addSourceMaterialization([](OpBuilder &builder, RankedTensorType tp,
@@ -76,71 +71,60 @@ SparseTensorTypeToBufferConverter::SparseTensorTypeToBufferConverter() {
 }
 
 //===----------------------------------------------------------------------===//
-// StorageLayout methods.
-//===----------------------------------------------------------------------===//
-
-unsigned StorageLayout::getMemRefFieldIndex(SparseTensorFieldKind kind,
-                                            std::optional<unsigned> dim) const {
-  unsigned fieldIdx = -1u;
-  foreachFieldInSparseTensor(
-      enc,
-      [dim, kind, &fieldIdx](unsigned fIdx, SparseTensorFieldKind fKind,
-                             unsigned fDim, DimLevelType dlt) -> bool {
-        if ((dim && fDim == dim.value() && kind == fKind) ||
-            (kind == fKind && fKind == SparseTensorFieldKind::ValMemRef)) {
-          fieldIdx = fIdx;
-          // Returns false to break the iteration.
-          return false;
-        }
-        return true;
-      });
-  assert(fieldIdx != -1u);
-  return fieldIdx;
-}
-
-unsigned StorageLayout::getMemRefFieldIndex(StorageSpecifierKind kind,
-                                            std::optional<unsigned> dim) const {
-  return getMemRefFieldIndex(toFieldKind(kind), dim);
-}
-
-//===----------------------------------------------------------------------===//
 // StorageTensorSpecifier methods.
 //===----------------------------------------------------------------------===//
 
 Value SparseTensorSpecifier::getInitValue(OpBuilder &builder, Location loc,
-                                          RankedTensorType rtp) {
+                                          SparseTensorType stt) {
   return builder.create<StorageSpecifierInitOp>(
-      loc, StorageSpecifierType::get(getSparseTensorEncoding(rtp)));
+      loc, StorageSpecifierType::get(stt.getEncoding()));
 }
 
 Value SparseTensorSpecifier::getSpecifierField(OpBuilder &builder, Location loc,
                                                StorageSpecifierKind kind,
                                                std::optional<unsigned> dim) {
-  return createIndexCast(builder, loc,
-                         builder.create<GetStorageSpecifierOp>(
-                             loc, getFieldType(kind, dim), specifier, kind,
-                             fromOptionalInt(specifier.getContext(), dim)),
-                         builder.getIndexType());
+  return builder.create<GetStorageSpecifierOp>(
+      loc, specifier, kind, fromOptionalInt(specifier.getContext(), dim));
 }
 
 void SparseTensorSpecifier::setSpecifierField(OpBuilder &builder, Location loc,
                                               Value v,
                                               StorageSpecifierKind kind,
                                               std::optional<unsigned> dim) {
+  assert(v.getType().isIndex());
   specifier = builder.create<SetStorageSpecifierOp>(
-      loc, specifier, kind, fromOptionalInt(specifier.getContext(), dim),
-      createIndexCast(builder, loc, v, getFieldType(kind, dim)));
+      loc, specifier, kind, fromOptionalInt(specifier.getContext(), dim), v);
+}
+
+//===----------------------------------------------------------------------===//
+// SparseTensorDescriptor methods.
+//===----------------------------------------------------------------------===//
+
+Value sparse_tensor::SparseTensorDescriptor::getIdxMemRefOrView(
+    OpBuilder &builder, Location loc, Level idxLvl) const {
+  const Level cooStart = getCOOStart(rType.getEncoding());
+  if (idxLvl < cooStart)
+    return getMemRefField(SparseTensorFieldKind::IdxMemRef, idxLvl);
+
+  Value stride = constantIndex(builder, loc, rType.getLvlRank() - cooStart);
+  Value size = getIdxMemSize(builder, loc, cooStart);
+  size = builder.create<arith::DivUIOp>(loc, size, stride);
+  return builder.create<memref::SubViewOp>(
+      loc, getMemRefField(SparseTensorFieldKind::IdxMemRef, cooStart),
+      /*offset=*/ValueRange{constantIndex(builder, loc, idxLvl - cooStart)},
+      /*size=*/ValueRange{size},
+      /*step=*/ValueRange{stride});
 }
 
 //===----------------------------------------------------------------------===//
 // Public methods.
 //===----------------------------------------------------------------------===//
 
-constexpr uint64_t kDataFieldStartingIdx = 0;
+constexpr FieldIndex kDataFieldStartingIdx = 0;
 
 void sparse_tensor::foreachFieldInSparseTensor(
     const SparseTensorEncodingAttr enc,
-    llvm::function_ref<bool(unsigned, SparseTensorFieldKind, unsigned,
+    llvm::function_ref<bool(FieldIndex, SparseTensorFieldKind, Level,
                             DimLevelType)>
         callback) {
   assert(enc);
@@ -149,19 +133,22 @@ void sparse_tensor::foreachFieldInSparseTensor(
   if (!(callback(idx, kind, dim, dlt)))                                        \
     return;
 
-  static_assert(kDataFieldStartingIdx == 0);
-  unsigned fieldIdx = kDataFieldStartingIdx;
+  const auto lvlTypes = enc.getDimLevelType();
+  const Level lvlRank = enc.getLvlRank();
+  const Level cooStart = getCOOStart(enc);
+  const Level end = cooStart == lvlRank ? cooStart : cooStart + 1;
+  FieldIndex fieldIdx = kDataFieldStartingIdx;
   // Per-dimension storage.
-  for (unsigned r = 0, rank = enc.getDimLevelType().size(); r < rank; r++) {
+  for (Level l = 0; l < end; l++) {
     // Dimension level types apply in order to the reordered dimension.
     // As a result, the compound type can be constructed directly in the given
     // order.
-    auto dlt = getDimLevelType(enc, r);
+    const auto dlt = lvlTypes[l];
     if (isCompressedDLT(dlt)) {
-      RETURN_ON_FALSE(fieldIdx++, SparseTensorFieldKind::PtrMemRef, r, dlt);
-      RETURN_ON_FALSE(fieldIdx++, SparseTensorFieldKind::IdxMemRef, r, dlt);
+      RETURN_ON_FALSE(fieldIdx++, SparseTensorFieldKind::PtrMemRef, l, dlt);
+      RETURN_ON_FALSE(fieldIdx++, SparseTensorFieldKind::IdxMemRef, l, dlt);
     } else if (isSingletonDLT(dlt)) {
-      RETURN_ON_FALSE(fieldIdx++, SparseTensorFieldKind::IdxMemRef, r, dlt);
+      RETURN_ON_FALSE(fieldIdx++, SparseTensorFieldKind::IdxMemRef, l, dlt);
     } else {
       assert(isDenseDLT(dlt)); // no fields
     }
@@ -178,18 +165,17 @@ void sparse_tensor::foreachFieldInSparseTensor(
 }
 
 void sparse_tensor::foreachFieldAndTypeInSparseTensor(
-    RankedTensorType rType,
-    llvm::function_ref<bool(Type, unsigned, SparseTensorFieldKind, unsigned,
+    SparseTensorType stt,
+    llvm::function_ref<bool(Type, FieldIndex, SparseTensorFieldKind, Level,
                             DimLevelType)>
         callback) {
-  auto enc = getSparseTensorEncoding(rType);
-  assert(enc);
+  assert(stt.hasEncoding());
   // Construct the basic types.
-  Type idxType = enc.getIndexType();
-  Type ptrType = enc.getPointerType();
-  Type eltType = rType.getElementType();
+  Type idxType = stt.getIndexType();
+  Type ptrType = stt.getPointerType();
+  Type eltType = stt.getElementType();
 
-  Type metaDataType = StorageSpecifierType::get(enc);
+  Type metaDataType = StorageSpecifierType::get(stt.getEncoding());
   // memref<? x ptr>  pointers
   Type ptrMemType = MemRefType::get({ShapedType::kDynamic}, ptrType);
   // memref<? x idx>  indices
@@ -198,19 +184,19 @@ void sparse_tensor::foreachFieldAndTypeInSparseTensor(
   Type valMemType = MemRefType::get({ShapedType::kDynamic}, eltType);
 
   foreachFieldInSparseTensor(
-      enc,
+      stt.getEncoding(),
       [metaDataType, ptrMemType, idxMemType, valMemType,
-       callback](unsigned fieldIdx, SparseTensorFieldKind fieldKind,
-                 unsigned dim, DimLevelType dlt) -> bool {
+       callback](FieldIndex fieldIdx, SparseTensorFieldKind fieldKind,
+                 Level lvl, DimLevelType dlt) -> bool {
         switch (fieldKind) {
         case SparseTensorFieldKind::StorageSpec:
-          return callback(metaDataType, fieldIdx, fieldKind, dim, dlt);
+          return callback(metaDataType, fieldIdx, fieldKind, lvl, dlt);
         case SparseTensorFieldKind::PtrMemRef:
-          return callback(ptrMemType, fieldIdx, fieldKind, dim, dlt);
+          return callback(ptrMemType, fieldIdx, fieldKind, lvl, dlt);
         case SparseTensorFieldKind::IdxMemRef:
-          return callback(idxMemType, fieldIdx, fieldKind, dim, dlt);
+          return callback(idxMemType, fieldIdx, fieldKind, lvl, dlt);
         case SparseTensorFieldKind::ValMemRef:
-          return callback(valMemType, fieldIdx, fieldKind, dim, dlt);
+          return callback(valMemType, fieldIdx, fieldKind, lvl, dlt);
         };
         llvm_unreachable("unrecognized field kind");
       });
@@ -219,8 +205,8 @@ void sparse_tensor::foreachFieldAndTypeInSparseTensor(
 unsigned sparse_tensor::getNumFieldsFromEncoding(SparseTensorEncodingAttr enc) {
   unsigned numFields = 0;
   foreachFieldInSparseTensor(enc,
-                             [&numFields](unsigned, SparseTensorFieldKind,
-                                          unsigned, DimLevelType) -> bool {
+                             [&numFields](FieldIndex, SparseTensorFieldKind,
+                                          Level, DimLevelType) -> bool {
                                numFields++;
                                return true;
                              });
@@ -231,8 +217,9 @@ unsigned
 sparse_tensor::getNumDataFieldsFromEncoding(SparseTensorEncodingAttr enc) {
   unsigned numFields = 0; // one value memref
   foreachFieldInSparseTensor(enc,
-                             [&numFields](unsigned fidx, SparseTensorFieldKind,
-                                          unsigned, DimLevelType) -> bool {
+                             [&numFields](FieldIndex fidx,
+                                          SparseTensorFieldKind, Level,
+                                          DimLevelType) -> bool {
                                if (fidx >= kDataFieldStartingIdx)
                                  numFields++;
                                return true;

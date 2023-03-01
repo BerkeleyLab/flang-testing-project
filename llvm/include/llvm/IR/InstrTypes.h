@@ -1803,7 +1803,10 @@ public:
   /// Extract the number of dereferenceable bytes for a call or
   /// parameter (0=unknown).
   uint64_t getRetDereferenceableBytes() const {
-    return Attrs.getRetDereferenceableBytes();
+    uint64_t Bytes = Attrs.getRetDereferenceableBytes();
+    if (const Function *F = getCalledFunction())
+      Bytes = std::max(Bytes, F->getAttributes().getRetDereferenceableBytes());
+    return Bytes;
   }
 
   /// Extract the number of dereferenceable bytes for a call or
@@ -1815,7 +1818,13 @@ public:
   /// Extract the number of dereferenceable_or_null bytes for a call
   /// (0=unknown).
   uint64_t getRetDereferenceableOrNullBytes() const {
-    return Attrs.getRetDereferenceableOrNullBytes();
+    uint64_t Bytes = Attrs.getRetDereferenceableOrNullBytes();
+    if (const Function *F = getCalledFunction()) {
+      Bytes = std::max(Bytes,
+                       F->getAttributes().getRetDereferenceableOrNullBytes());
+    }
+
+    return Bytes;
   }
 
   /// Extract the number of dereferenceable_or_null bytes for a
@@ -1823,6 +1832,14 @@ public:
   uint64_t getParamDereferenceableOrNullBytes(unsigned i) const {
     return Attrs.getParamDereferenceableOrNullBytes(i);
   }
+
+  /// Extract a test mask for disallowed floating-point value classes for the
+  /// return value.
+  FPClassTest getRetNoFPClass() const;
+
+  /// Extract a test mask for disallowed floating-point value classes for the
+  /// parameter.
+  FPClassTest getParamNoFPClass(unsigned i) const;
 
   /// Return true if the return value is known to be not null.
   /// This may be because it has the nonnull attribute, or because at least
@@ -2131,7 +2148,7 @@ public:
   /// OperandBundleUse.
   OperandBundleUse
   operandBundleFromBundleOpInfo(const BundleOpInfo &BOI) const {
-    auto begin = op_begin();
+    const auto *begin = op_begin();
     ArrayRef<Use> Inputs(begin + BOI.Begin, begin + BOI.End);
     return OperandBundleUse(BOI.Tag, Inputs);
   }

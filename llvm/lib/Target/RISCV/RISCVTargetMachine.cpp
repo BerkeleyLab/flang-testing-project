@@ -29,7 +29,6 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
-#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/FormattedStream.h"
@@ -82,6 +81,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVTarget() {
   initializeRISCVExpandPseudoPass(*PR);
   initializeRISCVInsertVSETVLIPass(*PR);
   initializeRISCVDAGToDAGISelPass(*PR);
+  initializeRISCVInitUndefPass(*PR);
 }
 
 static StringRef computeDataLayout(const Triple &TT) {
@@ -129,6 +129,15 @@ RISCVTargetMachine::getSubtargetImpl(const Function &F) const {
   unsigned RVVBitsMin = RVVVectorBitsMinOpt;
   unsigned RVVBitsMax = RVVVectorBitsMaxOpt;
 
+  Attribute VScaleRangeAttr = F.getFnAttribute(Attribute::VScaleRange);
+  if (VScaleRangeAttr.isValid()) {
+    if (!RVVVectorBitsMinOpt.getNumOccurrences())
+      RVVBitsMin = VScaleRangeAttr.getVScaleRangeMin() * RISCV::RVVBitsPerBlock;
+    std::optional<unsigned> VScaleMax = VScaleRangeAttr.getVScaleRangeMax();
+    if (VScaleMax.has_value() && !RVVVectorBitsMaxOpt.getNumOccurrences())
+      RVVBitsMax = *VScaleMax * RISCV::RVVBitsPerBlock;
+  }
+
   if (RVVBitsMin != -1U) {
     // FIXME: Change to >= 32 when VLEN = 32 is supported.
     assert((RVVBitsMin == 0 || (RVVBitsMin >= 64 && RVVBitsMin <= 65536 &&
@@ -150,11 +159,11 @@ RISCVTargetMachine::getSubtargetImpl(const Function &F) const {
       RVVBitsMax = std::max(RVVBitsMin, RVVBitsMax);
     }
 
-    RVVBitsMin =
-        PowerOf2Floor((RVVBitsMin < 64 || RVVBitsMin > 65536) ? 0 : RVVBitsMin);
+    RVVBitsMin = llvm::bit_floor(
+        (RVVBitsMin < 64 || RVVBitsMin > 65536) ? 0 : RVVBitsMin);
   }
   RVVBitsMax =
-      PowerOf2Floor((RVVBitsMax < 64 || RVVBitsMax > 65536) ? 0 : RVVBitsMax);
+      llvm::bit_floor((RVVBitsMax < 64 || RVVBitsMax > 65536) ? 0 : RVVBitsMax);
 
   SmallString<512> Key;
   Key += "RVVMin";
@@ -252,6 +261,7 @@ public:
   void addMachineSSAOptimization() override;
   void addPreRegAlloc() override;
   void addPostRegAlloc() override;
+  void addOptimizedRegAlloc() override;
 };
 } // namespace
 
@@ -345,6 +355,13 @@ void RISCVPassConfig::addPreRegAlloc() {
   if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createRISCVMergeBaseOffsetOptPass());
   addPass(createRISCVInsertVSETVLIPass());
+}
+
+void RISCVPassConfig::addOptimizedRegAlloc() {
+  if (getOptimizeRegAlloc())
+    insertPass(&DetectDeadLanesID, &RISCVInitUndefID);
+
+  TargetPassConfig::addOptimizedRegAlloc();
 }
 
 void RISCVPassConfig::addPostRegAlloc() {

@@ -23,6 +23,8 @@
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Conversion/VectorToLLVM/ConvertVectorToLLVM.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlow.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/GPU/Transforms/Passes.h"
@@ -104,6 +106,7 @@ struct LowerGpuOpsToROCDLOpsPass
         ctx, DataLayout(cast<DataLayoutOpInterface>(m.getOperation())));
     if (indexBitwidth != kDeriveIndexBitwidthFromDataLayout)
       options.overrideIndexBitwidth(indexBitwidth);
+    options.useOpaquePointers = useOpaquePointers;
 
     if (useBarePtrCallConv) {
       options.useBarePtrCallConv = true;
@@ -121,13 +124,31 @@ struct LowerGpuOpsToROCDLOpsPass
       }
     }
 
+    // Apply in-dialect lowering. In-dialect lowering will replace
+    // ops which need to be lowered further, which is not supported by a
+    // single conversion pass.
+    {
+      RewritePatternSet patterns(ctx);
+      populateGpuRewritePatterns(patterns);
+      (void)applyPatternsAndFoldGreedily(m, std::move(patterns));
+    }
+
     LLVMTypeConverter converter(ctx, options);
+    populateGpuMemorySpaceAttributeConversions(
+        converter, [](gpu::AddressSpace space) {
+          switch (space) {
+          case gpu::AddressSpace::Global:
+            return 1;
+          case gpu::AddressSpace::Workgroup:
+            return 3;
+          case gpu::AddressSpace::Private:
+            return 5;
+          }
+          llvm_unreachable("unknown address space enum value");
+          return 0;
+        });
 
-    RewritePatternSet patterns(ctx);
     RewritePatternSet llvmPatterns(ctx);
-
-    populateGpuRewritePatterns(patterns);
-    (void)applyPatternsAndFoldGreedily(m, std::move(patterns));
 
     mlir::arith::populateArithToLLVMConversionPatterns(converter, llvmPatterns);
     populateAMDGPUToROCDLConversionPatterns(converter, llvmPatterns,
@@ -135,7 +156,7 @@ struct LowerGpuOpsToROCDLOpsPass
     populateVectorToLLVMConversionPatterns(converter, llvmPatterns);
     cf::populateControlFlowToLLVMConversionPatterns(converter, llvmPatterns);
     populateFuncToLLVMConversionPatterns(converter, llvmPatterns);
-    populateMemRefToLLVMConversionPatterns(converter, llvmPatterns);
+    populateFinalizeMemRefToLLVMConversionPatterns(converter, llvmPatterns);
     populateGpuToROCDLConversionPatterns(converter, llvmPatterns, runtime);
     LLVMConversionTarget target(getContext());
     configureGpuToROCDLConversionLegality(target);
@@ -208,7 +229,9 @@ void mlir::populateGpuToROCDLConversionPatterns(
                                        ROCDL::GridDimYOp, ROCDL::GridDimZOp>,
            GPUReturnOpLowering>(converter);
   patterns.add<GPUFuncOpLowering>(
-      converter, /*allocaAddrSpace=*/5,
+      converter,
+      /*allocaAddrSpace=*/ROCDL::ROCDLDialect::kPrivateMemoryAddressSpace,
+      /*workgroupAddrSpace=*/ROCDL::ROCDLDialect::kSharedMemoryAddressSpace,
       StringAttr::get(&converter.getContext(),
                       ROCDL::ROCDLDialect::getKernelFuncAttrName()));
   if (Runtime::HIP == runtime) {
@@ -224,6 +247,8 @@ void mlir::populateGpuToROCDLConversionPatterns(
                                    "__ocml_atan_f64");
   populateOpPatterns<math::Atan2Op>(converter, patterns, "__ocml_atan2_f32",
                                     "__ocml_atan2_f64");
+  populateOpPatterns<math::CbrtOp>(converter, patterns, "__ocml_cbrt_f32",
+                                   "__ocml_cbrt_f64");
   populateOpPatterns<math::CeilOp>(converter, patterns, "__ocml_ceil_f32",
                                    "__ocml_ceil_f64");
   populateOpPatterns<math::CosOp>(converter, patterns, "__ocml_cos_f32",
@@ -254,6 +279,8 @@ void mlir::populateGpuToROCDLConversionPatterns(
                                    "__ocml_sqrt_f64");
   populateOpPatterns<math::TanhOp>(converter, patterns, "__ocml_tanh_f32",
                                    "__ocml_tanh_f64");
+  populateOpPatterns<math::TanOp>(converter, patterns, "__ocml_tan_f32",
+                                  "__ocml_tan_f64");
 }
 
 std::unique_ptr<OperationPass<gpu::GPUModuleOp>>

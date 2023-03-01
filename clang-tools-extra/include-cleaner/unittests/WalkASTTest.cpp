@@ -15,7 +15,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ScopedPrinter.h"
-#include "llvm/Testing/Support/Annotations.h"
+#include "llvm/Testing/Annotations/Annotations.h"
 #include "gtest/gtest.h"
 #include <cstddef>
 #include <unordered_map>
@@ -111,6 +111,9 @@ TEST(WalkAST, TagType) {
   testWalk("struct $explicit^S {};", "^S *y;");
   testWalk("enum $explicit^E {};", "^E *y;");
   testWalk("struct $explicit^S { static int x; };", "int y = ^S::x;");
+  // One explicit call from the TypeLoc in constructor spelling, another
+  // implicit reference through the constructor call.
+  testWalk("struct $explicit^$implicit^S { static int x; };", "auto y = ^S();");
 }
 
 TEST(WalkAST, Alias) {
@@ -240,9 +243,20 @@ TEST(WalkAST, MemberExprs) {
 
 TEST(WalkAST, ConstructExprs) {
   testWalk("struct $implicit^S {};", "S ^t;");
-  testWalk("struct S { $implicit^S(); };", "S ^t;");
-  testWalk("struct S { $explicit^S(int); };", "S ^t(42);");
-  testWalk("struct S { $implicit^S(int); };", "S t = ^42;");
+  testWalk("struct $implicit^S { S(); };", "S ^t;");
+  testWalk("struct $implicit^S { S(int); };", "S ^t(42);");
+  testWalk("struct $implicit^S { S(int); };", "S t = ^42;");
+  testWalk("namespace ns { struct S{}; } using ns::$implicit^S;", "S ^t;");
+}
+
+TEST(WalkAST, Operator) {
+  // References to operators are not counted as uses.
+  testWalk("struct string {}; int operator+(string, string);",
+           "int k = string() ^+ string();");
+  testWalk("struct string {int operator+(string); }; ",
+           "int k = string() ^+ string();");
+  testWalk("struct string { friend int operator+(string, string); }; ",
+           "int k = string() ^+ string();");
 }
 
 TEST(WalkAST, Functions) {

@@ -1050,9 +1050,15 @@ TEST(ParameterHints, ParamNameComment) {
     void bar() {
       foo(/*param*/42);
       foo( /* param = */ 42);
+#define X 42
+#define Y X
+#define Z(...) Y
+      foo(/*param=*/Z(a));
+      foo($macro[[Z(a)]]);
       foo(/* the answer */$param[[42]]);
     }
   )cpp",
+                       ExpectedHint{"param: ", "macro"},
                        ExpectedHint{"param: ", "param"});
 }
 
@@ -1256,6 +1262,13 @@ TEST(TypeHints, StructuredBindings_NoInitializer) {
   )cpp");
 }
 
+TEST(TypeHints, InvalidType) {
+  assertTypeHints(R"cpp(
+    auto x = (unknown_type)42; /*error-ok*/
+    auto *y = (unknown_ptr)nullptr;
+  )cpp");
+}
+
 TEST(TypeHints, ReturnTypeDeduction) {
   assertTypeHints(
       R"cpp(
@@ -1378,6 +1391,10 @@ TEST(TypeHints, Decltype) {
     using G = Foo<$g[[decltype(0)]], float>;
 
     auto $h[[h]] = $i[[decltype(0)]]{};
+
+    // No crash
+    /* error-ok */
+    auto $j[[s]];
   )cpp",
                   ExpectedHint{": int", "a"}, ExpectedHint{": int", "b"},
                   ExpectedHint{": int", "c"}, ExpectedHint{": int", "e"},

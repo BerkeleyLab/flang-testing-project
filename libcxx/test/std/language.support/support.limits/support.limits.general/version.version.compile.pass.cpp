@@ -127,7 +127,8 @@
     __cpp_lib_parallel_algorithm                   201603L [C++17]
     __cpp_lib_polymorphic_allocator                201902L [C++20]
     __cpp_lib_quoted_string_io                     201304L [C++14]
-    __cpp_lib_ranges                               201811L [C++20]
+    __cpp_lib_ranges                               202106L [C++20]
+    __cpp_lib_ranges_as_rvalue                     202207L [C++2b]
     __cpp_lib_ranges_chunk                         202202L [C++2b]
     __cpp_lib_ranges_chunk_by                      202202L [C++2b]
     __cpp_lib_ranges_iota                          202202L [C++2b]
@@ -619,6 +620,10 @@
 
 # ifdef __cpp_lib_ranges
 #   error "__cpp_lib_ranges should not be defined before c++20"
+# endif
+
+# ifdef __cpp_lib_ranges_as_rvalue
+#   error "__cpp_lib_ranges_as_rvalue should not be defined before c++2b"
 # endif
 
 # ifdef __cpp_lib_ranges_chunk
@@ -1293,6 +1298,10 @@
 
 # ifdef __cpp_lib_ranges
 #   error "__cpp_lib_ranges should not be defined before c++20"
+# endif
+
+# ifdef __cpp_lib_ranges_as_rvalue
+#   error "__cpp_lib_ranges_as_rvalue should not be defined before c++2b"
 # endif
 
 # ifdef __cpp_lib_ranges_chunk
@@ -2134,6 +2143,10 @@
 #   error "__cpp_lib_ranges should not be defined before c++20"
 # endif
 
+# ifdef __cpp_lib_ranges_as_rvalue
+#   error "__cpp_lib_ranges_as_rvalue should not be defined before c++2b"
+# endif
+
 # ifdef __cpp_lib_ranges_chunk
 #   error "__cpp_lib_ranges_chunk should not be defined before c++2b"
 # endif
@@ -2705,17 +2718,11 @@
 #   error "__cpp_lib_constexpr_cmath should not be defined before c++2b"
 # endif
 
-# if !defined(_LIBCPP_VERSION)
-#   ifndef __cpp_lib_constexpr_complex
-#     error "__cpp_lib_constexpr_complex should be defined in c++20"
-#   endif
-#   if __cpp_lib_constexpr_complex != 201711L
-#     error "__cpp_lib_constexpr_complex should have the value 201711L in c++20"
-#   endif
-# else // _LIBCPP_VERSION
-#   ifdef __cpp_lib_constexpr_complex
-#     error "__cpp_lib_constexpr_complex should not be defined because it is unimplemented in libc++!"
-#   endif
+# ifndef __cpp_lib_constexpr_complex
+#   error "__cpp_lib_constexpr_complex should be defined in c++20"
+# endif
+# if __cpp_lib_constexpr_complex != 201711L
+#   error "__cpp_lib_constexpr_complex should have the value 201711L in c++20"
 # endif
 
 # ifndef __cpp_lib_constexpr_dynamic_alloc
@@ -3242,8 +3249,12 @@
 # ifndef __cpp_lib_ranges
 #   error "__cpp_lib_ranges should be defined in c++20"
 # endif
-# if __cpp_lib_ranges != 201811L
-#   error "__cpp_lib_ranges should have the value 201811L in c++20"
+# if __cpp_lib_ranges != 202106L
+#   error "__cpp_lib_ranges should have the value 202106L in c++20"
+# endif
+
+# ifdef __cpp_lib_ranges_as_rvalue
+#   error "__cpp_lib_ranges_as_rvalue should not be defined before c++2b"
 # endif
 
 # ifdef __cpp_lib_ranges_chunk
@@ -3397,16 +3408,16 @@
 #   endif
 # endif
 
-# if !defined(_LIBCPP_VERSION)
+# if __has_builtin(__builtin_source_location)
 #   ifndef __cpp_lib_source_location
 #     error "__cpp_lib_source_location should be defined in c++20"
 #   endif
 #   if __cpp_lib_source_location != 201907L
 #     error "__cpp_lib_source_location should have the value 201907L in c++20"
 #   endif
-# else // _LIBCPP_VERSION
+# else
 #   ifdef __cpp_lib_source_location
-#     error "__cpp_lib_source_location should not be defined because it is unimplemented in libc++!"
+#     error "__cpp_lib_source_location should not be defined when the requirement '__has_builtin(__builtin_source_location)' is not met!"
 #   endif
 # endif
 
@@ -3931,17 +3942,11 @@
 #   endif
 # endif
 
-# if !defined(_LIBCPP_VERSION)
-#   ifndef __cpp_lib_constexpr_complex
-#     error "__cpp_lib_constexpr_complex should be defined in c++2b"
-#   endif
-#   if __cpp_lib_constexpr_complex != 201711L
-#     error "__cpp_lib_constexpr_complex should have the value 201711L in c++2b"
-#   endif
-# else // _LIBCPP_VERSION
-#   ifdef __cpp_lib_constexpr_complex
-#     error "__cpp_lib_constexpr_complex should not be defined because it is unimplemented in libc++!"
-#   endif
+# ifndef __cpp_lib_constexpr_complex
+#   error "__cpp_lib_constexpr_complex should be defined in c++2b"
+# endif
+# if __cpp_lib_constexpr_complex != 201711L
+#   error "__cpp_lib_constexpr_complex should have the value 201711L in c++2b"
 # endif
 
 # ifndef __cpp_lib_constexpr_dynamic_alloc
@@ -4000,17 +4005,11 @@
 #   error "__cpp_lib_constexpr_tuple should have the value 201811L in c++2b"
 # endif
 
-# if !defined(_LIBCPP_VERSION)
-#   ifndef __cpp_lib_constexpr_typeinfo
-#     error "__cpp_lib_constexpr_typeinfo should be defined in c++2b"
-#   endif
-#   if __cpp_lib_constexpr_typeinfo != 202106L
-#     error "__cpp_lib_constexpr_typeinfo should have the value 202106L in c++2b"
-#   endif
-# else // _LIBCPP_VERSION
-#   ifdef __cpp_lib_constexpr_typeinfo
-#     error "__cpp_lib_constexpr_typeinfo should not be defined because it is unimplemented in libc++!"
-#   endif
+# ifndef __cpp_lib_constexpr_typeinfo
+#   error "__cpp_lib_constexpr_typeinfo should be defined in c++2b"
+# endif
+# if __cpp_lib_constexpr_typeinfo != 202106L
+#   error "__cpp_lib_constexpr_typeinfo should have the value 202106L in c++2b"
 # endif
 
 # ifndef __cpp_lib_constexpr_utility
@@ -4225,17 +4224,11 @@
 #   error "__cpp_lib_invoke should have the value 201411L in c++2b"
 # endif
 
-# if !defined(_LIBCPP_VERSION)
-#   ifndef __cpp_lib_invoke_r
-#     error "__cpp_lib_invoke_r should be defined in c++2b"
-#   endif
-#   if __cpp_lib_invoke_r != 202106L
-#     error "__cpp_lib_invoke_r should have the value 202106L in c++2b"
-#   endif
-# else // _LIBCPP_VERSION
-#   ifdef __cpp_lib_invoke_r
-#     error "__cpp_lib_invoke_r should not be defined because it is unimplemented in libc++!"
-#   endif
+# ifndef __cpp_lib_invoke_r
+#   error "__cpp_lib_invoke_r should be defined in c++2b"
+# endif
+# if __cpp_lib_invoke_r != 202106L
+#   error "__cpp_lib_invoke_r should have the value 202106L in c++2b"
 # endif
 
 # ifndef __cpp_lib_is_aggregate
@@ -4513,8 +4506,15 @@
 # ifndef __cpp_lib_ranges
 #   error "__cpp_lib_ranges should be defined in c++2b"
 # endif
-# if __cpp_lib_ranges != 201811L
-#   error "__cpp_lib_ranges should have the value 201811L in c++2b"
+# if __cpp_lib_ranges != 202106L
+#   error "__cpp_lib_ranges should have the value 202106L in c++2b"
+# endif
+
+# ifndef __cpp_lib_ranges_as_rvalue
+#   error "__cpp_lib_ranges_as_rvalue should be defined in c++2b"
+# endif
+# if __cpp_lib_ranges_as_rvalue != 202207L
+#   error "__cpp_lib_ranges_as_rvalue should have the value 202207L in c++2b"
 # endif
 
 # if !defined(_LIBCPP_VERSION)
@@ -4749,16 +4749,16 @@
 #   endif
 # endif
 
-# if !defined(_LIBCPP_VERSION)
+# if __has_builtin(__builtin_source_location)
 #   ifndef __cpp_lib_source_location
 #     error "__cpp_lib_source_location should be defined in c++2b"
 #   endif
 #   if __cpp_lib_source_location != 201907L
 #     error "__cpp_lib_source_location should have the value 201907L in c++2b"
 #   endif
-# else // _LIBCPP_VERSION
+# else
 #   ifdef __cpp_lib_source_location
-#     error "__cpp_lib_source_location should not be defined because it is unimplemented in libc++!"
+#     error "__cpp_lib_source_location should not be defined when the requirement '__has_builtin(__builtin_source_location)' is not met!"
 #   endif
 # endif
 

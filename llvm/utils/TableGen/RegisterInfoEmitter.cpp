@@ -12,9 +12,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "CodeGenHwModes.h"
 #include "CodeGenRegisters.h"
 #include "CodeGenTarget.h"
+#include "InfoByHwMode.h"
 #include "SequenceToOffsetTable.h"
+#include "TableGenBackends.h"
 #include "Types.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
@@ -1408,12 +1411,12 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
         OS << "  const MCRegisterClass &MCR = " << Target.getName()
            << "MCRegisterClasses[" << RC.getQualifiedName() + "RegClassID];\n"
            << "  const ArrayRef<MCPhysReg> Order[] = {\n"
-           << "    makeArrayRef(MCR.begin(), MCR.getNumRegs()";
+           << "    ArrayRef(MCR.begin(), MCR.getNumRegs()";
         for (unsigned oi = 1, oe = RC.getNumOrders(); oi != oe; ++oi)
           if (RC.getOrder(oi).empty())
             OS << "),\n    ArrayRef<MCPhysReg>(";
           else
-            OS << "),\n    makeArrayRef(AltOrder" << oi;
+            OS << "),\n    ArrayRef(AltOrder" << oi;
         OS << ")\n  };\n  const unsigned Select = " << RC.getName()
            << "AltOrderSelect(MF);\n  assert(Select < " << RC.getNumOrders()
            << ");\n  return Order[Select];\n}\n";
@@ -1740,7 +1743,7 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
     for (Record *CSRSet : CSRSets)
       OS << "    " << CSRSet->getName() << "_RegMask,\n";
     OS << "  };\n";
-    OS << "  return makeArrayRef(Masks);\n";
+    OS << "  return ArrayRef(Masks);\n";
   } else {
     OS << "  return std::nullopt;\n";
   }
@@ -1806,7 +1809,7 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
     for (Record *CSRSet : CSRSets)
       OS << "    " << '"' << CSRSet->getName() << '"' << ",\n";
     OS << "  };\n";
-    OS << "  return makeArrayRef(Names);\n";
+    OS << "  return ArrayRef(Names);\n";
   } else {
     OS << "  return std::nullopt;\n";
   }

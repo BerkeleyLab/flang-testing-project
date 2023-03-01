@@ -12,6 +12,7 @@ set(LLVM_COMMON_CMAKE_UTILS "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 list(INSERT CMAKE_MODULE_PATH 0
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../runtimes/cmake/Modules"
   "${LLVM_COMMON_CMAKE_UTILS}"
   "${LLVM_COMMON_CMAKE_UTILS}/Modules"
   )
@@ -269,11 +270,6 @@ if (LIBCXX_BUILD_32_BITS)
   message(FATAL_ERROR "LIBCXX_BUILD_32_BITS is not supported anymore when building the runtimes, please specify a full triple instead.")
 endif()
 
-# TODO: Remove this after branching for LLVM 15
-if(LIBCXX_SYSROOT OR LIBCXX_TARGET_TRIPLE OR LIBCXX_GCC_TOOLCHAIN)
-  message(WARNING "LIBCXX_SYSROOT, LIBCXX_TARGET_TRIPLE and LIBCXX_GCC_TOOLCHAIN are not supported anymore, please use the native CMake equivalents instead")
-endif()
-
 # Feature options -------------------------------------------------------------
 option(LIBCXX_ENABLE_EXCEPTIONS "Use exceptions." ON)
 option(LIBCXX_ENABLE_RTTI "Use run time type information." ON)
@@ -469,7 +465,7 @@ include(HandleLibcxxFlags)
 # 'LIBCXX_COMPILE_FLAGS' and 'LIBCXX_LINK_FLAGS'
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "AIX")
-  add_target_flags_if_supported("-mdefault-visibility-export-mapping=explicit")
+  add_flags_if_supported("-mdefault-visibility-export-mapping=explicit")
   set(CMAKE_AIX_EXPORT_ALL_SYMBOLS OFF)
 endif()
 
@@ -541,11 +537,6 @@ function(cxx_add_basic_build_flags target)
   # symbols on all compilers.
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_add_compile_flags_if_supported(${target} PRIVATE -fvisibility=hidden)
-  endif()
-
-  if (LIBCXX_CONFIGURE_IDE)
-    # This simply allows IDE to process <experimental/coroutine>
-    target_add_compile_flags_if_supported(${target} PRIVATE -fcoroutines-ts)
   endif()
 
   # Let the library headers know they are currently being used to build the

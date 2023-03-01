@@ -20,6 +20,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/YAMLParser.h"
+#include <optional>
 
 #define DEBUG_TYPE "clang-tidy"
 
@@ -27,8 +28,7 @@
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
+namespace clang::tidy {
 
 llvm::ArrayRef<
     std::pair<readability::IdentifierNamingCheck::CaseType, StringRef>>
@@ -46,7 +46,7 @@ OptionEnumMapping<
            "Camel_Snake_Case"},
           {readability::IdentifierNamingCheck::CT_CamelSnakeBack,
            "camel_Snake_Back"}};
-  return llvm::makeArrayRef(Mapping);
+  return llvm::ArrayRef(Mapping);
 }
 
 template <>
@@ -61,7 +61,7 @@ struct OptionEnumMapping<
         {HungarianPrefixType::HPT_On, "On"},
         {HungarianPrefixType::HPT_LowerCase, "LowerCase"},
         {HungarianPrefixType::HPT_CamelCase, "CamelCase"}};
-    return llvm::makeArrayRef(Mapping);
+    return llvm::ArrayRef(Mapping);
   }
 };
 
@@ -173,6 +173,7 @@ static StringRef const StyleNames[] = {
      m(unsigned-short-int) \
      m(unsigned-short) \
      m(unsigned-int) \
+     m(unsigned-char) \
      m(unsigned) \
      m(long-long-int) \
      m(long-double) \
@@ -180,6 +181,7 @@ static StringRef const StyleNames[] = {
      m(long-int) \
      m(long) \
      m(ptrdiff_t) \
+     m(void) \
 
 static StringRef const HungarainNotationPrimitiveTypes[] = {
 #define STRINGIZE(v) #v,
@@ -228,7 +230,7 @@ static StringRef const HungarainNotationUserDefinedTypes[] = {
 // clang-format on
 
 IdentifierNamingCheck::NamingStyle::NamingStyle(
-    llvm::Optional<IdentifierNamingCheck::CaseType> Case,
+    std::optional<IdentifierNamingCheck::CaseType> Case,
     const std::string &Prefix, const std::string &Suffix,
     const std::string &IgnoredRegexpStr, HungarianPrefixType HPType)
     : Case(Case), Prefix(Prefix), Suffix(Suffix),
@@ -249,7 +251,7 @@ IdentifierNamingCheck::FileStyle IdentifierNamingCheck::getFileStyleFromOptions(
   HungarianNotation.loadDefaultConfig(HNOption);
   HungarianNotation.loadFileConfig(Options, HNOption);
 
-  SmallVector<llvm::Optional<IdentifierNamingCheck::NamingStyle>, 0> Styles;
+  SmallVector<std::optional<IdentifierNamingCheck::NamingStyle>, 0> Styles;
   Styles.resize(SK_Count);
   SmallString<64> StyleString;
   for (unsigned I = 0; I < SK_Count; ++I) {
@@ -458,9 +460,9 @@ void IdentifierNamingCheck::HungarianNotation::loadFileConfig(
   }
 
   static constexpr std::pair<StringRef, StringRef> HNCStrings[] = {
-      {"CharPrinter", "char*"},
+      {"CharPointer", "char*"},
       {"CharArray", "char[]"},
-      {"WideCharPrinter", "wchar_t*"},
+      {"WideCharPointer", "wchar_t*"},
       {"WideCharArray", "wchar_t[]"}};
 
   Buffer = {Section, "CString."};
@@ -470,7 +472,7 @@ void IdentifierNamingCheck::HungarianNotation::loadFileConfig(
     Buffer.append(CStr.first);
     StringRef Val = Options.get(Buffer, "");
     if (!Val.empty())
-      HNOption.CString[CStr.first] = Val.str();
+      HNOption.CString[CStr.second] = Val.str();
   }
 
   Buffer = {Section, "PrimitiveType."};
@@ -751,13 +753,15 @@ void IdentifierNamingCheck::HungarianNotation::loadDefaultConfig(
         {"unsigned short int",      "usi" },
         {"unsigned short",          "us"  },
         {"unsigned int",            "ui"  },
+        {"unsigned char",           "uc"  },
         {"unsigned",                "u"   },
         {"long long int",           "lli" },
         {"long double",             "ld"  },
         {"long long",               "ll"  },
         {"long int",                "li"  },
         {"long",                    "l"   },
-        {"ptrdiff_t",               "p"   }};
+        {"ptrdiff_t",               "p"   },
+        {"void",                    ""    }};
   // clang-format on
   for (const auto &PT : PrimitiveTypes)
     HNOption.PrimitiveType.try_emplace(PT.first, PT.second);
@@ -801,7 +805,7 @@ void IdentifierNamingCheck::HungarianNotation::loadDefaultConfig(
 void IdentifierNamingCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
   RenamerClangTidyCheck::storeOptions(Opts);
   SmallString<64> StyleString;
-  ArrayRef<llvm::Optional<NamingStyle>> Styles = MainFileStyle->getStyles();
+  ArrayRef<std::optional<NamingStyle>> Styles = MainFileStyle->getStyles();
   for (size_t I = 0; I < SK_Count; ++I) {
     if (!Styles[I])
       continue;
@@ -1067,7 +1071,7 @@ std::string IdentifierNamingCheck::fixupWithStyle(
 
 StyleKind IdentifierNamingCheck::findStyleKind(
     const NamedDecl *D,
-    ArrayRef<llvm::Optional<IdentifierNamingCheck::NamingStyle>> NamingStyles,
+    ArrayRef<std::optional<IdentifierNamingCheck::NamingStyle>> NamingStyles,
     bool IgnoreMainLikeFunctions) const {
   assert(D && D->getIdentifier() && !D->getName().empty() && !D->isImplicit() &&
          "Decl must be an explicit identifier with a name.");
@@ -1352,11 +1356,11 @@ StyleKind IdentifierNamingCheck::findStyleKind(
   return SK_Invalid;
 }
 
-llvm::Optional<RenamerClangTidyCheck::FailureInfo>
+std::optional<RenamerClangTidyCheck::FailureInfo>
 IdentifierNamingCheck::getFailureInfo(
     StringRef Type, StringRef Name, const NamedDecl *ND,
     SourceLocation Location,
-    ArrayRef<llvm::Optional<IdentifierNamingCheck::NamingStyle>> NamingStyles,
+    ArrayRef<std::optional<IdentifierNamingCheck::NamingStyle>> NamingStyles,
     const IdentifierNamingCheck::HungarianNotationOption &HNOption,
     StyleKind SK, const SourceManager &SM, bool IgnoreFailedSplit) const {
   if (SK == SK_Invalid || !NamingStyles[SK])
@@ -1388,7 +1392,7 @@ IdentifierNamingCheck::getFailureInfo(
                                             std::move(Fixup)};
 }
 
-llvm::Optional<RenamerClangTidyCheck::FailureInfo>
+std::optional<RenamerClangTidyCheck::FailureInfo>
 IdentifierNamingCheck::getDeclFailureInfo(const NamedDecl *Decl,
                                           const SourceManager &SM) const {
   SourceLocation Loc = Decl->getLocation();
@@ -1404,7 +1408,7 @@ IdentifierNamingCheck::getDeclFailureInfo(const NamedDecl *Decl,
                         SM, IgnoreFailedSplit);
 }
 
-llvm::Optional<RenamerClangTidyCheck::FailureInfo>
+std::optional<RenamerClangTidyCheck::FailureInfo>
 IdentifierNamingCheck::getMacroFailureInfo(const Token &MacroNameTok,
                                            const SourceManager &SM) const {
   SourceLocation Loc = MacroNameTok.getLocation();
@@ -1450,5 +1454,4 @@ IdentifierNamingCheck::getStyleForFile(StringRef FileName) const {
 }
 
 } // namespace readability
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy

@@ -593,6 +593,8 @@ if (MINGW)
 endif()
 
 set(armv4t_SOURCES ${arm_min_SOURCES})
+set(armv5te_SOURCES ${arm_min_SOURCES})
+set(armv6_SOURCES ${arm_min_SOURCES})
 set(armhf_SOURCES ${arm_SOURCES})
 set(armv7_SOURCES ${arm_SOURCES})
 set(armv7s_SOURCES ${arm_SOURCES})
@@ -733,6 +735,10 @@ set(ve_SOURCES
 add_custom_target(builtins)
 set_target_properties(builtins PROPERTIES FOLDER "Compiler-RT Misc")
 
+option(COMPILER_RT_ENABLE_SOFTWARE_INT128
+  "Enable the int128 builtin routines for all targets."
+  OFF)
+
 if (APPLE)
   add_subdirectory(Darwin-excludes)
   add_subdirectory(macho_embedded)
@@ -770,6 +776,10 @@ else ()
     append_list_if(COMPILER_RT_HAS_VISIBILITY_HIDDEN_FLAG VISIBILITY_HIDDEN BUILTIN_DEFS)
   endif()
 
+  if(COMPILER_RT_DISABLE_AARCH64_FMV)
+    list(APPEND BUILTIN_DEFS DISABLE_AARCH64_FMV)
+  endif()
+
   append_list_if(COMPILER_RT_HAS_ASM_LSE HAS_ASM_LSE BUILTIN_DEFS)
 
   foreach (arch ${BUILTIN_SUPPORTED_ARCH})
@@ -805,7 +815,7 @@ else ()
 
       # For RISCV32, we must force enable int128 for compiling long
       # double routines.
-      if("${arch}" STREQUAL "riscv32")
+      if(COMPILER_RT_ENABLE_SOFTWARE_INT128 OR "${arch}" STREQUAL "riscv32")
         list(APPEND BUILTIN_CFLAGS_${arch} -fforce-enable-int128)
       endif()
 

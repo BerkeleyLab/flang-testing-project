@@ -50,13 +50,13 @@ struct TosaInlinerInterface : public DialectInlinerInterface {
 
   /// All operations can be inlined by default.
   bool isLegalToInline(Operation *op, Region *region, bool wouldBeCloned,
-                       BlockAndValueMapping &map) const final {
+                       IRMapping &map) const final {
     return true;
   }
 
   /// All regions with If and While parent operators can be inlined.
   bool isLegalToInline(Region *dest, Region *src, bool wouldBeCloned,
-                       BlockAndValueMapping &map) const final {
+                       IRMapping &map) const final {
     return (isa<tosa::IfOp>(dest->getParentOp()) ||
             isa<tosa::WhileOp>(dest->getParentOp()));
   }
@@ -324,12 +324,6 @@ static void buildExplicitValuePadOpWithQuantInfo(OpBuilder &builder,
 // TOSA Operator Return Type Inference.
 //===----------------------------------------------------------------------===//
 
-static void getI64Values(ArrayAttr arrayAttr, SmallVector<int64_t> &values) {
-  for (auto it : arrayAttr) {
-    values.push_back(it.cast<IntegerAttr>().getValue().getSExtValue());
-  }
-}
-
 static LogicalResult resolveBroadcastShape(const ValueShapeRange &operands,
                                            SmallVector<int64_t> &outShape) {
   int64_t outRank = 0;
@@ -390,6 +384,31 @@ LogicalResult tosa::ArgMaxOp::inferReturnTypeComponents(
   }
 
   inferredReturnShapes.push_back(ShapedTypeComponents(outShape));
+  return success();
+}
+
+LogicalResult tosa::RFFT2dOp::inferReturnTypeComponents(
+    MLIRContext *context, ::std::optional<Location> location,
+    ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
+    SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
+  ShapeAdaptor inputShape = operands.getShape(0);
+
+  if (!inputShape.hasRank())
+    return failure();
+
+  llvm::SmallVector<int64_t> outputShape;
+  outputShape.resize(3, ShapedType::kDynamic);
+  outputShape[0] = inputShape.getDimSize(0);
+  outputShape[1] = inputShape.getDimSize(1);
+  int64_t inWidth = inputShape.getDimSize(2);
+
+  // Note that we can support this calculation symbolically
+  // in the future e.g. [x, y, z] -> [x, y, z / 2 - 1]
+  if (inWidth != ShapedType::kDynamic)
+    outputShape[2] = inWidth / 2 + 1;
+
+  inferredReturnShapes.push_back(ShapedTypeComponents(outputShape));
+  inferredReturnShapes.push_back(ShapedTypeComponents(outputShape));
   return success();
 }
 
@@ -594,15 +613,8 @@ LogicalResult tosa::SliceOp::inferReturnTypeComponents(
     MLIRContext *context, ::std::optional<Location> location,
     ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
-  ArrayAttr sizes = SliceOpAdaptor(operands, attributes).getSize();
-  SmallVector<int64_t> outputShape;
-  outputShape.reserve(sizes.size());
-  for (auto val : sizes) {
-    outputShape.push_back(val.cast<IntegerAttr>().getValue().getSExtValue());
-  }
-
-  inferredReturnShapes.push_back(
-      ShapedTypeComponents(convertToMlirShape(outputShape)));
+  inferredReturnShapes.push_back(ShapedTypeComponents(
+      convertToMlirShape(SliceOpAdaptor(operands, attributes).getSize())));
   return success();
 }
 
@@ -627,7 +639,7 @@ LogicalResult tosa::TileOp::inferReturnTypeComponents(
     ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
   TileOpAdaptor adaptor(operands, attributes);
-  ArrayAttr multiples = adaptor.getMultiples();
+  ArrayRef<int64_t> multiples = adaptor.getMultiples();
   ShapeAdaptor inputShape = operands.getShape(0);
   SmallVector<int64_t> outputShape;
   if (!inputShape.hasRank()) {
@@ -636,19 +648,12 @@ LogicalResult tosa::TileOp::inferReturnTypeComponents(
     return success();
   }
 
-  // We need the multiple values to determine the output shape.
-  SmallVector<int64_t> multipleValues;
-  multipleValues.reserve(multiples.size());
-  for (auto val : multiples) {
-    multipleValues.push_back(val.cast<IntegerAttr>().getValue().getSExtValue());
-  }
-
   // Any non dynamic dimension can be multiplied to a known size.
   outputShape.reserve(multiples.size());
   for (int i = 0, s = inputShape.getRank(); i < s; i++) {
     int64_t dim = inputShape.getDimSize(i);
     if (dim != ShapedType::kDynamic)
-      dim *= multipleValues[i];
+      dim *= multiples[i];
     outputShape.push_back(dim);
   }
 
@@ -662,11 +667,8 @@ LogicalResult tosa::ReshapeOp::inferReturnTypeComponents(
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
   ReshapeOpAdaptor adaptor(operands, attributes);
   ShapeAdaptor inputShape = operands.getShape(0);
-
-  ArrayAttr newShape = adaptor.getNewShape();
-  llvm::SmallVector<int64_t> newShapeValue;
-  getI64Values(newShape, newShapeValue);
-  newShapeValue = convertToMlirShape(newShapeValue);
+  llvm::SmallVector<int64_t> newShapeValue =
+      convertToMlirShape(adaptor.getNewShape());
 
   // We cannot infer from the total number of elements so we must take the
   // shape attribute as exact.
@@ -709,6 +711,20 @@ mlir::LogicalResult tosa::ReshapeOp::verify() {
     }
   }
   return mlir::success();
+}
+
+LogicalResult tosa::TransposeOp::getConstantPerms(SmallVector<int64_t> &perms) {
+  // Perms must be constants.
+  DenseIntElementsAttr permsAttr;
+  if (!matchPattern(getPerms(), m_Constant(&permsAttr)))
+    return failure();
+
+  // Transpose is not the identity transpose.
+  perms = llvm::to_vector(
+      llvm::map_range(permsAttr.getValues<APInt>(),
+                      [](const APInt &val) { return val.getSExtValue(); }));
+
+  return success();
 }
 
 LogicalResult tosa::TransposeOp::inferReturnTypeComponents(
@@ -1384,6 +1400,12 @@ LogicalResult WhileOp::inferReturnTypeComponents(
   }
 
   return success();
+}
+
+std::optional<SmallVector<int64_t, 4>> ApplyScaleOp::getShapeForUnroll() {
+  if (auto vt = getType().dyn_cast<VectorType>())
+    return llvm::to_vector<4>(vt.getShape());
+  return std::nullopt;
 }
 
 //===----------------------------------------------------------------------===//

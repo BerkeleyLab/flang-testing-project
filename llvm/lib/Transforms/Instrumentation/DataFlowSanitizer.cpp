@@ -67,7 +67,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -104,6 +103,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SpecialCaseList.h"
 #include "llvm/Support/VirtualFileSystem.h"
+#include "llvm/TargetParser/Triple.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -404,7 +404,7 @@ transformFunctionAttributes(const TransformedFunction &TransformedFunction,
 
   return AttributeList::get(Ctx, CallSiteAttrs.getFnAttrs(),
                             CallSiteAttrs.getRetAttrs(),
-                            llvm::makeArrayRef(ArgumentAttributes));
+                            llvm::ArrayRef(ArgumentAttributes));
 }
 
 class DataFlowSanitizer {
@@ -3190,7 +3190,7 @@ Value *DFSanVisitor::makeAddAcquireOrderingTable(IRBuilder<> &IRB) {
       (int)AtomicOrderingCABI::seq_cst;
 
   return ConstantDataVector::get(IRB.getContext(),
-                                 makeArrayRef(OrderingTable, NumOrderings));
+                                 ArrayRef(OrderingTable, NumOrderings));
 }
 
 void DFSanVisitor::visitLibAtomicLoad(CallBase &CB) {
@@ -3235,7 +3235,7 @@ Value *DFSanVisitor::makeAddReleaseOrderingTable(IRBuilder<> &IRB) {
       (int)AtomicOrderingCABI::seq_cst;
 
   return ConstantDataVector::get(IRB.getContext(),
-                                 makeArrayRef(OrderingTable, NumOrderings));
+                                 ArrayRef(OrderingTable, NumOrderings));
 }
 
 void DFSanVisitor::visitLibAtomicStore(CallBase &CB) {

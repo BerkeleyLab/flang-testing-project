@@ -1,5 +1,5 @@
-// RUN: mlir-opt %s -convert-gpu-to-rocdl -split-input-file | FileCheck %s
-// RUN: mlir-opt %s -convert-gpu-to-rocdl='index-bitwidth=32' -split-input-file | FileCheck --check-prefix=CHECK32 %s
+// RUN: mlir-opt %s -convert-gpu-to-rocdl='use-opaque-pointers=1' -split-input-file | FileCheck %s
+// RUN: mlir-opt %s -convert-gpu-to-rocdl='index-bitwidth=32 use-opaque-pointers=1' -split-input-file | FileCheck --check-prefix=CHECK32 %s
 
 gpu.module @test_module {
   // CHECK-LABEL: func @gpu_index_ops()
@@ -123,6 +123,21 @@ gpu.module @test_module {
     // CHECK: llvm.call @__ocml_fabs_f32(%{{.*}}) : (f32) -> f32
     %result64 = math.absf %arg_f64 : f64
     // CHECK: llvm.call @__ocml_fabs_f64(%{{.*}}) : (f64) -> f64
+    func.return %result32, %result64 : f32, f64
+  }
+}
+
+// -----
+
+gpu.module @test_module {
+  // CHECK: llvm.func @__ocml_cbrt_f32(f32) -> f32
+  // CHECK: llvm.func @__ocml_cbrt_f64(f64) -> f64
+  // CHECK-LABEL: func @gpu_cbrt
+  func.func @gpu_cbrt(%arg_f32 : f32, %arg_f64 : f64) -> (f32, f64) {
+    %result32 = math.cbrt %arg_f32 : f32
+    // CHECK: llvm.call @__ocml_cbrt_f32(%{{.*}}) : (f32) -> f32
+    %result64 = math.cbrt %arg_f64 : f64
+    // CHECK: llvm.call @__ocml_cbrt_f64(%{{.*}}) : (f64) -> f64
     func.return %result32, %result64 : f32, f64
   }
 }
@@ -348,6 +363,21 @@ gpu.module @test_module {
 // -----
 
 gpu.module @test_module {
+  // CHECK: llvm.func @__ocml_tan_f32(f32) -> f32
+  // CHECK: llvm.func @__ocml_tan_f64(f64) -> f64
+  // CHECK-LABEL: func @gpu_tan
+  func.func @gpu_tan(%arg_f32 : f32, %arg_f64 : f64) -> (f32, f64) {
+    %result32 = math.tan %arg_f32 : f32
+    // CHECK: llvm.call @__ocml_tan_f32(%{{.*}}) : (f32) -> f32
+    %result64 = math.tan %arg_f64 : f64
+    // CHECK: llvm.call @__ocml_tan_f64(%{{.*}}) : (f64) -> f64
+    func.return %result32, %result64 : f32, f64
+  }
+}
+
+// -----
+
+gpu.module @test_module {
   // CHECK: llvm.func @__ocml_tanh_f32(f32) -> f32
   // CHECK: llvm.func @__ocml_tanh_f64(f64) -> f64
   // CHECK-LABEL: func @gpu_tanh
@@ -430,3 +460,15 @@ gpu.module @test_module {
     gpu.return
   }
 }
+
+// -----
+
+gpu.module @module {
+// CHECK-LABEL: @spirv_exp
+// CHECK: llvm.call @__ocml_exp_f32
+  spirv.func @spirv_exp(%arg0: vector<4xf32>) -> vector<4xf32> "None" {
+    %0 = math.exp %arg0 : vector<4xf32>
+    spirv.ReturnValue %0 : vector<4xf32>
+  }
+}
+

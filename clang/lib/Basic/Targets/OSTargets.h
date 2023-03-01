@@ -535,6 +535,8 @@ protected:
     DefineStd(Builder, "unix", Opts);
     Builder.defineMacro("__ELF__");
     Builder.defineMacro("__SCE__");
+    Builder.defineMacro("__STDC_NO_COMPLEX__");
+    Builder.defineMacro("__STDC_NO_THREADS__");
   }
 
 public:
@@ -773,6 +775,10 @@ public:
   }
 
   bool defaultsToAIXPowerAlignment() const override { return true; }
+
+  bool areDefaultedSMFStillPOD(const LangOptions &) const override {
+    return false;
+  }
 };
 
 // z/OS target
@@ -830,6 +836,10 @@ public:
     this->UseZeroLengthBitfieldAlignment = true;
     this->UseLeadingZeroLengthBitfield = false;
     this->ZeroLengthBitfieldBoundary = 32;
+  }
+
+  bool areDefaultedSMFStillPOD(const LangOptions &) const override {
+    return false;
   }
 };
 

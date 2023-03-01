@@ -216,6 +216,11 @@ Attribute Attribute::getWithMemoryEffects(LLVMContext &Context,
   return get(Context, Memory, ME.toIntValue());
 }
 
+Attribute Attribute::getWithNoFPClass(LLVMContext &Context,
+                                      FPClassTest ClassMask) {
+  return get(Context, NoFPClass, ClassMask);
+}
+
 Attribute
 Attribute::getWithAllocSizeArgs(LLVMContext &Context, unsigned ElemSizeArg,
                                 const std::optional<unsigned> &NumElemsArg) {
@@ -259,6 +264,16 @@ bool Attribute::isExistingAttribute(StringRef Name) {
 #define ATTRIBUTE_ALL(ENUM_NAME, DISPLAY_NAME) .Case(#DISPLAY_NAME, true)
 #include "llvm/IR/Attributes.inc"
       .Default(false);
+}
+
+/// Returns true if this is a type legal for the 'nofpclass' attribute. This
+/// follows the same type rules as FPMathOperator.
+///
+/// TODO: Consider relaxing to any FP type struct fields.
+static bool isNoFPClassCompatibleType(Type *Ty) {
+  while (ArrayType *ArrTy = dyn_cast<ArrayType>(Ty))
+    Ty = ArrTy->getElementType();
+  return Ty->isFPOrFPVectorTy();
 }
 
 //===----------------------------------------------------------------------===//
@@ -396,6 +411,12 @@ MemoryEffects Attribute::getMemoryEffects() const {
   return MemoryEffects::createFromIntValue(pImpl->getValueAsInt());
 }
 
+FPClassTest Attribute::getNoFPClass() const {
+  assert(hasAttribute(Attribute::NoFPClass) &&
+         "Can only call getNoFPClass() on nofpclass attribute");
+  return static_cast<FPClassTest>(pImpl->getValueAsInt());
+}
+
 static const char *getModRefStr(ModRefInfo MR) {
   switch (MR) {
   case ModRefInfo::NoModRef:
@@ -408,6 +429,56 @@ static const char *getModRefStr(ModRefInfo MR) {
     return "readwrite";
   }
   llvm_unreachable("Invalid ModRefInfo");
+}
+
+// Every bitfield has a unique name and one or more aliasing names that cover
+// multiple bits. Names should be listed in order of preference, with higher
+// popcounts listed first.
+//
+// Bits are consumed as printed. Each field should only be represented in one
+// printed field.
+static constexpr std::pair<unsigned, StringLiteral> NoFPClassName[] = {
+  {fcAllFlags, "all"},
+  {fcNan, "nan"},
+  {fcSNan, "snan"},
+  {fcQNan, "qnan"},
+  {fcInf, "inf"},
+  {fcNegInf, "ninf"},
+  {fcPosInf, "pinf"},
+  {fcZero, "zero"},
+  {fcNegZero, "nzero"},
+  {fcPosZero, "pzero"},
+  {fcSubnormal, "sub"},
+  {fcNegSubnormal, "nsub"},
+  {fcPosSubnormal, "psub"},
+  {fcNormal, "norm"},
+  {fcNegNormal, "nnorm"},
+  {fcPosNormal, "pnorm"}
+};
+
+static std::string getNoFPClassAttrAsString(unsigned Mask) {
+  std::string Result("nofpclass(");
+  raw_string_ostream OS(Result);
+
+  if (Mask == 0) {
+    OS << "none)";
+    return Result;
+  }
+
+  ListSeparator LS(" ");
+  for (auto [BitTest, Name] : NoFPClassName) {
+    if ((Mask & BitTest) == BitTest) {
+      OS << LS << Name;
+
+      // Clear the bits so we don't print any aliased names later.
+      Mask &= ~BitTest;
+    }
+  }
+
+  assert(Mask == 0 && "didn't print some mask bits");
+
+  OS << ')';
+  return Result;
 }
 
 std::string Attribute::getAsString(bool InAttrGrp) const {
@@ -542,6 +613,9 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     OS.flush();
     return Result;
   }
+
+  if (hasAttribute(Attribute::NoFPClass))
+    return getNoFPClassAttrAsString(getValueAsInt());
 
   // Convert target-dependent attributes to strings of the form:
   //
@@ -840,6 +914,10 @@ MemoryEffects AttributeSet::getMemoryEffects() const {
   return SetNode ? SetNode->getMemoryEffects() : MemoryEffects::unknown();
 }
 
+FPClassTest AttributeSet::getNoFPClass() const {
+  return SetNode ? SetNode->getNoFPClass() : fcNone;
+}
+
 std::string AttributeSet::getAsString(bool InAttrGrp) const {
   return SetNode ? SetNode->getAsString(InAttrGrp) : "";
 }
@@ -1024,6 +1102,12 @@ MemoryEffects AttributeSetNode::getMemoryEffects() const {
   return MemoryEffects::unknown();
 }
 
+FPClassTest AttributeSetNode::getNoFPClass() const {
+  if (auto A = findEnumAttribute(Attribute::NoFPClass))
+    return A->getNoFPClass();
+  return fcNone;
+}
+
 std::string AttributeSetNode::getAsString(bool InAttrGrp) const {
   std::string Str;
   for (iterator I = begin(), E = end(); I != E; ++I) {
@@ -1064,7 +1148,7 @@ AttributeListImpl::AttributeListImpl(ArrayRef<AttributeSet> Sets)
 }
 
 void AttributeListImpl::Profile(FoldingSetNodeID &ID) const {
-  Profile(ID, makeArrayRef(begin(), end()));
+  Profile(ID, ArrayRef(begin(), end()));
 }
 
 void AttributeListImpl::Profile(FoldingSetNodeID &ID,
@@ -1301,9 +1385,9 @@ AttributeList AttributeList::get(LLVMContext &C,
 AttributeList
 AttributeList::addAttributeAtIndex(LLVMContext &C, unsigned Index,
                                    Attribute::AttrKind Kind) const {
-  if (hasAttributeAtIndex(Index, Kind))
-    return *this;
   AttributeSet Attrs = getAttributes(Index);
+  if (Attrs.hasAttribute(Kind))
+    return *this;
   // TODO: Insert at correct position and avoid sort.
   SmallVector<Attribute, 8> NewAttrs(Attrs.begin(), Attrs.end());
   NewAttrs.push_back(Attribute::get(C, Kind));
@@ -1333,6 +1417,12 @@ AttributeList AttributeList::setAttributesAtIndex(LLVMContext &C,
   if (Index >= AttrSets.size())
     AttrSets.resize(Index + 1);
   AttrSets[Index] = Attrs;
+
+  // Remove trailing empty attribute sets.
+  while (!AttrSets.empty() && !AttrSets.back().hasAttributes())
+    AttrSets.pop_back();
+  if (AttrSets.empty())
+    return {};
   return AttributeList::getImpl(C, AttrSets);
 }
 
@@ -1373,31 +1463,21 @@ AttributeList AttributeList::addParamAttribute(LLVMContext &C,
 AttributeList
 AttributeList::removeAttributeAtIndex(LLVMContext &C, unsigned Index,
                                       Attribute::AttrKind Kind) const {
-  if (!hasAttributeAtIndex(Index, Kind))
+  AttributeSet Attrs = getAttributes(Index);
+  AttributeSet NewAttrs = Attrs.removeAttribute(C, Kind);
+  if (Attrs == NewAttrs)
     return *this;
-
-  Index = attrIdxToArrayIdx(Index);
-  SmallVector<AttributeSet, 4> AttrSets(this->begin(), this->end());
-  assert(Index < AttrSets.size());
-
-  AttrSets[Index] = AttrSets[Index].removeAttribute(C, Kind);
-
-  return getImpl(C, AttrSets);
+  return setAttributesAtIndex(C, Index, NewAttrs);
 }
 
 AttributeList AttributeList::removeAttributeAtIndex(LLVMContext &C,
                                                     unsigned Index,
                                                     StringRef Kind) const {
-  if (!hasAttributeAtIndex(Index, Kind))
+  AttributeSet Attrs = getAttributes(Index);
+  AttributeSet NewAttrs = Attrs.removeAttribute(C, Kind);
+  if (Attrs == NewAttrs)
     return *this;
-
-  Index = attrIdxToArrayIdx(Index);
-  SmallVector<AttributeSet, 4> AttrSets(this->begin(), this->end());
-  assert(Index < AttrSets.size());
-
-  AttrSets[Index] = AttrSets[Index].removeAttribute(C, Kind);
-
-  return getImpl(C, AttrSets);
+  return setAttributesAtIndex(C, Index, NewAttrs);
 }
 
 AttributeList AttributeList::removeAttributesAtIndex(
@@ -1415,12 +1495,9 @@ AttributeList::removeAttributesAtIndex(LLVMContext &C,
                                        unsigned WithoutIndex) const {
   if (!pImpl)
     return {};
-  WithoutIndex = attrIdxToArrayIdx(WithoutIndex);
-  if (WithoutIndex >= getNumAttrSets())
+  if (attrIdxToArrayIdx(WithoutIndex) >= getNumAttrSets())
     return *this;
-  SmallVector<AttributeSet, 4> AttrSets(this->begin(), this->end());
-  AttrSets[WithoutIndex] = AttributeSet();
-  return getImpl(C, AttrSets);
+  return setAttributesAtIndex(C, WithoutIndex, AttributeSet());
 }
 
 AttributeList AttributeList::addDereferenceableRetAttr(LLVMContext &C,
@@ -1565,6 +1642,14 @@ uint64_t AttributeList::getRetDereferenceableOrNullBytes() const {
 uint64_t
 AttributeList::getParamDereferenceableOrNullBytes(unsigned Index) const {
   return getParamAttrs(Index).getDereferenceableOrNullBytes();
+}
+
+FPClassTest AttributeList::getRetNoFPClass() const {
+  return getRetAttrs().getNoFPClass();
+}
+
+FPClassTest AttributeList::getParamNoFPClass(unsigned Index) const {
+  return getParamAttrs(Index).getNoFPClass();
 }
 
 UWTableKind AttributeList::getUWTableKind() const {
@@ -1810,6 +1895,10 @@ AttrBuilder &AttrBuilder::addMemoryAttr(MemoryEffects ME) {
   return addRawIntAttr(Attribute::Memory, ME.toIntValue());
 }
 
+AttrBuilder &AttrBuilder::addNoFPClassAttr(FPClassTest Mask) {
+  return addRawIntAttr(Attribute::NoFPClass, Mask);
+}
+
 AttrBuilder &AttrBuilder::addAllocKindAttr(AllocFnKind Kind) {
   return addRawIntAttr(Attribute::AllocKind, static_cast<uint64_t>(Kind));
 }
@@ -1931,6 +2020,11 @@ AttributeMask AttributeFuncs::typeIncompatible(Type *Ty,
   if (!Ty->isPtrOrPtrVectorTy()) {
     if (ASK & ASK_SAFE_TO_DROP)
       Incompatible.addAttribute(Attribute::Alignment);
+  }
+
+  if (ASK & ASK_SAFE_TO_DROP) {
+    if (!isNoFPClassCompatibleType(Ty))
+      Incompatible.addAttribute(Attribute::NoFPClass);
   }
 
   // Some attributes can apply to all "values" but there are no `void` values.

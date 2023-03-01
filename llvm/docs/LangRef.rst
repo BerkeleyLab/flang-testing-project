@@ -366,8 +366,9 @@ added in the future:
     apply for values returned in callee-saved registers.
 
     - On X86-64 the callee preserves all general purpose registers, except for
-      R11. R11 can be used as a scratch register. Floating-point registers
-      (XMMs/YMMs) are not preserved and need to be saved by the caller.
+      R11 and return registers, if any. R11 can be used as a scratch register.
+      Floating-point registers (XMMs/YMMs) are not preserved and need to be
+      saved by the caller.
 
     The idea behind this convention is to support calls to runtime functions
     that have a hot path and a cold path. The hot path is usually a small piece
@@ -715,14 +716,16 @@ to over-align the global if the global has an assigned section. In this
 case, the extra alignment could be observable: for example, code could
 assume that the globals are densely packed in their section and try to
 iterate over them as an array, alignment padding would break this
-iteration. The maximum alignment is ``1 << 32``.
+iteration. For TLS variables, the module flag ``MaxTLSAlign``, if present,
+limits the alignment to the given value. Optimizers are not allowed to
+impose a stronger alignment on these variables. The maximum alignment
+is ``1 << 32``.
 
-For global variables declarations, as well as definitions that may be
+For global variable declarations, as well as definitions that may be
 replaced at link time (``linkonce``, ``weak``, ``extern_weak`` and ``common``
-linkage types), LLVM makes no assumptions about the allocation size of the
-variables, except that they may not overlap. The alignment of a global variable
-declaration or replaceable definition must not be greater than the alignment of
-the definition it resolves to.
+linkage types), the allocation size and alignment of the definition it resolves
+to must be greater than or equal to that of the declaration or replaceable
+definition, otherwise the behavior is undefined.
 
 Globals can also have a :ref:`DLL storage class <dllstorageclass>`,
 an optional :ref:`runtime preemption specifier <runtime_preemption_model>`,
@@ -1392,6 +1395,79 @@ Currently, only the following parameter attributes are defined:
     representation contains any undefined or poison bits, the behavior is
     undefined. Note that this does not refer to padding introduced by the
     type's storage representation.
+
+.. _nofpclass:
+
+``nofpclass(<test mask>)``
+    This attribute applies to parameters and return values with
+    floating-point and vector of floating-point types, as well as
+    arrays of such types. The test mask has the same format as the
+    second argument to the :ref:`llvm.is.fpclass <llvm.is.fpclass>`,
+    and indicates which classes of floating-point values are not
+    permitted for the value. For example a bitmask of 3 indicates
+    the parameter may not be a NaN.
+
+    If the value is a floating-point class indicated by the
+    ``nofpclass`` test mask, a :ref:`poison value <poisonvalues>` is
+    passed or returned instead.
+
+.. code-block:: text
+  :caption: The following invariants hold
+
+       @llvm.is.fpclass(nofpclass(test_mask) %x, test_mask) => false
+       @llvm.is.fpclass(nofpclass(test_mask) %x, ~test_mask) => true
+       nofpclass(all) => poison
+..
+
+   In textual IR, various string names are supported for readability
+   and can be combined. For example ``nofpclass(nan pinf nzero)``
+   evaluates to a mask of 547.
+
+   This does not depend on the floating-point environment. For
+   example, a function parameter marked ``nofpclass(zero)`` indicates
+   no zero inputs. If this is applied to an argument in a function
+   marked with :ref:`\"denormal-fp-math\" <denormal_fp_math>`
+   indicating zero treatment of input denormals, it does not imply the
+   value cannot be a denormal value which would compare equal to 0.
+
+.. table:: Recognized test mask names
+
+    +-------+----------------------+---------------+
+    | Name  | floating-point class | Bitmask value |
+    +=======+======================+===============+
+    |  nan  | Any NaN              |       3       |
+    +-------+----------------------+---------------+
+    |  inf  | +/- infinity         |      516      |
+    +-------+----------------------+---------------+
+    |  norm | +/- normal           |       26      |
+    +-------+----------------------+---------------+
+    |  sub  | +/- subnormal        |      144      |
+    +-------+----------------------+---------------+
+    |  zero | +/- 0                |       96      |
+    +-------+----------------------+---------------+
+    |  all  | All values           |     1023      |
+    +-------+----------------------+---------------+
+    | snan  | Signaling NaN        |       1       |
+    +-------+----------------------+---------------+
+    | qnan  | Quiet NaN            |       2       |
+    +-------+----------------------+---------------+
+    | ninf  | Negative infinity    |       4       |
+    +-------+----------------------+---------------+
+    | nnorm | Negative normal      |       8       |
+    +-------+----------------------+---------------+
+    | nsub  | Negative subnormal   |       16      |
+    +-------+----------------------+---------------+
+    | nzero | Negative zero        |       32      |
+    +-------+----------------------+---------------+
+    | pzero | Positive zero        |       64      |
+    +-------+----------------------+---------------+
+    | psub  | Positive subnormal   |       128     |
+    +-------+----------------------+---------------+
+    | pnorm | Positive normal      |       256     |
+    +-------+----------------------+---------------+
+    | pinf  | Positive infinity    |       512     |
+    +-------+----------------------+---------------+
+
 
 ``alignstack(<n>)``
     This indicates the alignment that should be considered by the backend when
@@ -2144,6 +2220,8 @@ example:
     might otherwise be set or cleared by calling this function. LLVM will
     not introduce any new floating-point instructions that may trap.
 
+.. _denormal_fp_math:
+
 ``"denormal-fp-math"``
     This indicates the denormal (subnormal) handling that may be
     assumed for the default floating-point environment. This is a
@@ -2767,21 +2845,23 @@ as follows:
     specified, the default index size is equal to the pointer size. All sizes
     are in bits. The address space, ``n``, is optional, and if not specified,
     denotes the default address space 0. The value of ``n`` must be
-    in the range [1,2^23).
+    in the range [1,2^24).
 ``i<size>:<abi>[:<pref>]``
     This specifies the alignment for an integer type of a given bit
-    ``<size>``. The value of ``<size>`` must be in the range [1,2^23).
+    ``<size>``. The value of ``<size>`` must be in the range [1,2^24).
     ``<pref>`` is optional and defaults to ``<abi>``.
+    For ``i8``, the ``<abi>`` value must equal 8,
+    that is, ``i8`` must be naturally aligned.
 ``v<size>:<abi>[:<pref>]``
     This specifies the alignment for a vector type of a given bit
-    ``<size>``. The value of ``<size>`` must be in the range [1,2^23).
+    ``<size>``. The value of ``<size>`` must be in the range [1,2^24).
     ``<pref>`` is optional and defaults to ``<abi>``.
 ``f<size>:<abi>[:<pref>]``
     This specifies the alignment for a floating-point type of a given bit
     ``<size>``. Only values of ``<size>`` that are supported by the target
     will work. 32 (float) and 64 (double) are supported on all targets; 80
     or 128 (different flavors of long double) are also supported on some
-    targets. The value of ``<size>`` must be in the range [1,2^23).
+    targets. The value of ``<size>`` must be in the range [1,2^24).
     ``<pref>`` is optional and defaults to ``<abi>``.
 ``a:<abi>[:<pref>]``
     This specifies the alignment for an object of aggregate type.
@@ -2839,7 +2919,7 @@ specifications are given in this list:
    same as the default address space.
 -  ``S0`` - natural stack alignment is unspecified
 -  ``i1:8:8`` - i1 is 8-bit (byte) aligned
--  ``i8:8:8`` - i8 is 8-bit (byte) aligned
+-  ``i8:8:8`` - i8 is 8-bit (byte) aligned as mandated
 -  ``i16:16:16`` - i16 is 16-bit aligned
 -  ``i32:32:32`` - i32 is 32-bit aligned
 -  ``i64:32:64`` - i64 has ABI alignment of 32-bits but preferred
@@ -3279,15 +3359,17 @@ seq\_cst total orderings of other operations that are not marked
 Floating-Point Environment
 --------------------------
 
-The default LLVM floating-point environment assumes that floating-point
-instructions do not have side effects. Results assume the round-to-nearest
-rounding mode. No floating-point exception state is maintained in this
-environment. Therefore, there is no attempt to create or preserve invalid
-operation (SNaN) or division-by-zero exceptions.
+The default LLVM floating-point environment assumes that traps are disabled and
+status flags are not observable. Therefore, floating-point math operations do
+not have side effects and may be speculated freely. Results assume the
+round-to-nearest rounding mode.
 
-The benefit of this exception-free assumption is that floating-point
-operations may be speculated freely without any other fast-math relaxations
-to the floating-point model.
+Floating-point math operations are allowed to treat all NaNs as if they were
+quiet NaNs. For example, "pow(1.0, SNaN)" may be simplified to 1.0. This also
+means that SNaN may be passed through a math operation without quieting. For
+example, "fmul SNaN, 1.0" may be simplified to SNaN rather than QNaN. However,
+SNaN values are never created by math operations. They may only occur when
+provided as a program input value.
 
 Code that requires different behavior than this should use the
 :ref:`Constrained Floating-Point Intrinsics <constrainedfp>`.
@@ -5406,9 +5488,10 @@ and ``g2`` using the ``!dbg`` identifier:
 Unlike instructions, global objects (functions and global variables) may have
 multiple metadata attachments with the same identifier.
 
-A transformation is required to drop any metadata attachment that it does not
-know or know it can't preserve. Currently there is an exception for metadata
-attachment to globals for ``!func_sanitize``, ``!type`` and ``!absolute_symbol`` which can't be
+A transformation is required to drop any metadata attachment that it
+does not know or know it can't preserve. Currently there is an
+exception for metadata attachment to globals for ``!func_sanitize``,
+``!type``, ``!absolute_symbol`` and ``!associated`` which can't be
 unconditionally dropped unless the global is itself deleted.
 
 Metadata attached to a module using named metadata may not be dropped, with
@@ -5768,11 +5851,12 @@ retained, even if their IR counterparts are optimized out of the IR. The
 
 .. _DISubprogramDeclaration:
 
-When ``isDefinition: false``, subprograms describe a declaration in the type
-tree as opposed to a definition of a function.  If the scope is a composite
-type with an ODR ``identifier:`` and that does not set ``flags: DIFwdDecl``,
-then the subprogram declaration is uniqued based only on its ``linkageName:``
-and ``scope:``.
+When ``spFlags: DISPFlagDefinition`` is not present, subprograms describe a
+declaration in the type tree as opposed to a definition of a function. In this
+case, the ``declaration`` field must be empty. If the scope is a composite type
+with an ODR ``identifier:`` and that does not set ``flags: DIFwdDecl``, then
+the subprogram declaration is uniqued based only on its ``linkageName:`` and
+``scope:``.
 
 .. code-block:: text
 
@@ -5781,9 +5865,9 @@ and ``scope:``.
     }
 
     !0 = distinct !DISubprogram(name: "foo", linkageName: "_Zfoov", scope: !1,
-                                file: !2, line: 7, type: !3, isLocal: true,
-                                isDefinition: true, scopeLine: 8,
-                                containingType: !4,
+                                file: !2, line: 7, type: !3,
+                                spFlags: DISPFlagDefinition | DISPFlagLocalToUnit,
+                                scopeLine: 8, containingType: !4,
                                 virtuality: DW_VIRTUALITY_pure_virtual,
                                 virtualIndex: 10, flags: DIFlagPrototyped,
                                 isOptimized: true, unit: !5, templateParams: !6,
@@ -5996,6 +6080,21 @@ valid debug intrinsic.
     !3 = !DIExpression(DW_OP_deref, DW_OP_constu, 3, DW_OP_plus, DW_OP_LLVM_fragment, 3, 7)
     !4 = !DIExpression(DW_OP_constu, 2, DW_OP_swap, DW_OP_xderef)
     !5 = !DIExpression(DW_OP_constu, 42, DW_OP_stack_value)
+
+DIAssignID
+""""""""""""
+
+``DIAssignID`` nodes have no operands and are always distinct. They are used to
+link together `@llvm.dbg.assign` intrinsics (:ref:`debug
+intrinsics<dbg_intrinsics>`) and instructions that store in IR. See `Debug Info
+Assignment Tracking <AssignmentTracking.html>`_ for more info.
+
+.. code-block:: llvm
+
+    store i32 %a, ptr %a.addr, align 4, !DIAssignID !2
+    llvm.dbg.assign(metadata %a, metadata !1, metadata !DIExpression(), !2, metadata %a.addr, metadata !DIExpression()), !dbg !3
+
+    !2 = distinct !DIAssignID()
 
 DIArgList
 """"""""""""
@@ -6375,10 +6474,10 @@ representing the maximum relative error, for example:
 ``range`` metadata may be attached only to ``load``, ``call`` and ``invoke`` of
 integer types. It expresses the possible ranges the loaded value or the value
 returned by the called function at this call site is in. If the loaded or
-returned value is not in the specified range, the behavior is undefined. The
-ranges are represented with a flattened list of integers. The loaded value or
-the value returned is known to be in the union of the ranges defined by each
-consecutive pair. Each pair has the following properties:
+returned value is not in the specified range, a poison value is returned
+instead. The ranges are represented with a flattened list of integers. The
+loaded value or the value returned is known to be in the union of the ranges
+defined by each consecutive pair. Each pair has the following properties:
 
 -  The type must match the type loaded by the instruction.
 -  The pair ``a,b`` represents the range ``[a,b)``.
@@ -8517,6 +8616,14 @@ function, with the possibility of control flow transfer to either the
 This instruction should only be used to implement the "goto" feature of gcc
 style inline assembly. Any other usage is an error in the IR verifier.
 
+Note that in order to support outputs along indirect edges, LLVM may need to
+split critical edges, which may require synthesizing a replacement block for
+the ``indirect labels``. Therefore, the address of a label as seen by another
+``callbr`` instruction, or for a :ref:`blockaddress <blockaddress>` constant,
+may not be equal to the address provided for the same block to this
+instruction's ``indirect labels`` operand. The assembly code may only transfer
+control to addresses provided via this instruction's ``indirect labels``.
+
 Arguments:
 """"""""""
 
@@ -10059,11 +10166,15 @@ The '``alloca``' instruction allocates ``sizeof(<type>)*NumElements``
 bytes of memory on the runtime stack, returning a pointer of the
 appropriate type to the program. If "NumElements" is specified, it is
 the number of elements allocated, otherwise "NumElements" is defaulted
-to be one. If a constant alignment is specified, the value result of the
+to be one.
+
+If a constant alignment is specified, the value result of the
 allocation is guaranteed to be aligned to at least that boundary. The
-alignment may not be greater than ``1 << 32``. If not specified, or if
-zero, the target can choose to align the allocation on any convenient
-boundary compatible with the type.
+alignment may not be greater than ``1 << 32``.
+
+The alignment is only optional when parsing textual IR; for in-memory IR,
+it is always present. If not specified, the target can choose to align the
+allocation on any convenient boundary compatible with the type.
 
 '``type``' may be any sized type.
 
@@ -10145,18 +10256,20 @@ alignment is not set to a value which is at least the size in bytes of the
 pointee. ``!nontemporal`` does not have any defined semantics for atomic loads.
 
 The optional constant ``align`` argument specifies the alignment of the
-operation (that is, the alignment of the memory address). A value of 0
-or an omitted ``align`` argument means that the operation has the ABI
-alignment for the target. It is the responsibility of the code emitter
-to ensure that the alignment information is correct. Overestimating the
-alignment results in undefined behavior. Underestimating the alignment
-may produce less efficient code. An alignment of 1 is always safe. The
-maximum possible alignment is ``1 << 32``. An alignment value higher
-than the size of the loaded type implies memory up to the alignment
-value bytes can be safely loaded without trapping in the default
-address space. Access of the high bytes can interfere with debugging
-tools, so should not be accessed if the function has the
-``sanitize_thread`` or ``sanitize_address`` attributes.
+operation (that is, the alignment of the memory address). It is the 
+responsibility of the code emitter to ensure that the alignment information is
+correct. Overestimating the alignment results in undefined behavior. 
+Underestimating the alignment may produce less efficient code. An alignment of
+1 is always safe. The maximum possible alignment is ``1 << 32``. An alignment 
+value higher than the size of the loaded type implies memory up to the
+alignment value bytes can be safely loaded without trapping in the default
+address space. Access of the high bytes can interfere with debugging tools, so
+should not be accessed if the function has the ``sanitize_thread`` or
+``sanitize_address`` attributes.
+
+The alignment is only optional when parsing textual IR; for in-memory IR, it is
+always present. An omitted ``align`` argument means that the operation has the
+ABI alignment for the target.
 
 The optional ``!nontemporal`` metadata must reference a single
 metadata name ``<nontemp_node>`` corresponding to a metadata node with one
@@ -10182,9 +10295,9 @@ The optional ``!nonnull`` metadata must reference a single
 metadata name ``<empty_node>`` corresponding to a metadata node with no
 entries. The existence of the ``!nonnull`` metadata on the
 instruction tells the optimizer that the value loaded is known to
-never be null. If the value is null at runtime, the behavior is undefined.
-This is analogous to the ``nonnull`` attribute on parameters and return
-values. This metadata can only be applied to loads of a pointer type.
+never be null. If the value is null at runtime, a poison value is returned
+instead.  This is analogous to the ``nonnull`` attribute on parameters and
+return values. This metadata can only be applied to loads of a pointer type.
 
 The optional ``!dereferenceable`` metadata must reference a single metadata
 name ``<deref_bytes_node>`` corresponding to a metadata node with one ``i64``
@@ -10204,13 +10317,16 @@ optimizer that the value loaded is known to be aligned to a boundary specified
 by the integer value in the metadata node. The alignment must be a power of 2.
 This is analogous to the ''align'' attribute on parameters and return values.
 This metadata can only be applied to loads of a pointer type. If the returned
-value is not appropriately aligned at runtime, the behavior is undefined.
+value is not appropriately aligned at runtime, a poison value is returned
+instead.
 
 The optional ``!noundef`` metadata must reference a single metadata name
 ``<empty_node>`` corresponding to a node with no entries. The existence of
 ``!noundef`` metadata on the instruction tells the optimizer that the value
 loaded is known to be :ref:`well defined <welldefinedvalues>`.
-If the value isn't well defined, the behavior is undefined.
+If the value isn't well defined, the behavior is undefined. If the ``!noundef``
+metadata is combined with poison-generating metadata like ``!nonnull``,
+violation of that metadata constraint will also result in undefined behavior.
 
 Semantics:
 """"""""""
@@ -10280,20 +10396,20 @@ the alignment is not set to a value which is at least the size in bytes of the
 pointee. ``!nontemporal`` does not have any defined semantics for atomic stores.
 
 The optional constant ``align`` argument specifies the alignment of the
-operation (that is, the alignment of the memory address). A value of 0
-or an omitted ``align`` argument means that the operation has the ABI
-alignment for the target. It is the responsibility of the code emitter
-to ensure that the alignment information is correct. Overestimating the
-alignment results in undefined behavior. Underestimating the
-alignment may produce less efficient code. An alignment of 1 is always
-safe. The maximum possible alignment is ``1 << 32``. An alignment
-value higher than the size of the stored type implies memory up to the
-alignment value bytes can be stored to without trapping in the default
-address space. Storing to the higher bytes however may result in data
-races if another thread can access the same address. Introducing a
-data race is not allowed. Storing to the extra bytes is not allowed
-even in situations where a data race is known to not exist if the
-function has the ``sanitize_address`` attribute.
+operation (that is, the alignment of the memory address). It is the 
+responsibility of the code emitter to ensure that the alignment information is
+correct. Overestimating the alignment results in undefined behavior. 
+Underestimating the alignment may produce less efficient code. An alignment of
+1 is always safe. The maximum possible alignment is ``1 << 32``. An alignment 
+value higher than the size of the loaded type implies memory up to the
+alignment value bytes can be safely loaded without trapping in the default
+address space. Access of the high bytes can interfere with debugging tools, so
+should not be accessed if the function has the ``sanitize_thread`` or
+``sanitize_address`` attributes.
+
+The alignment is only optional when parsing textual IR; for in-memory IR, it is
+always present. An omitted ``align`` argument means that the operation has the
+ABI alignment for the target.
 
 The optional ``!nontemporal`` metadata must reference a single metadata
 name ``<nontemp_node>`` corresponding to a metadata node with one ``i32`` entry
@@ -10427,9 +10543,11 @@ must be at least ``monotonic``, the failure ordering cannot be either
 A ``cmpxchg`` instruction can also take an optional
 ":ref:`syncscope <syncscope>`" argument.
 
-The instruction can take an optional ``align`` attribute.
 The alignment must be a power of two greater or equal to the size of the
-`<value>` type. If unspecified, the alignment is assumed to be equal to the
+`<value>` type.
+
+The alignment is only optional when parsing textual IR; for in-memory IR, it is
+always present. If unspecified, the alignment is assumed to be equal to the
 size of the '<value>' type. Note that this default alignment assumption is
 different from the alignment used for the load/store instructions when align
 isn't specified.
@@ -10515,6 +10633,8 @@ operation. The operation must be one of the following keywords:
 -  fsub
 -  fmax
 -  fmin
+-  uinc_wrap
+-  udec_wrap
 
 For most of these operations, the type of '<value>' must be an integer
 type whose bit width is a power of two greater than or equal to eight
@@ -10526,9 +10646,11 @@ the ``atomicrmw`` is marked as ``volatile``, then the optimizer is not
 allowed to modify the number or order of execution of this
 ``atomicrmw`` with other :ref:`volatile operations <volatile>`.
 
-The instruction can take an optional ``align`` attribute.
 The alignment must be a power of two greater or equal to the size of the
-`<value>` type. If unspecified, the alignment is assumed to be equal to the
+`<value>` type.
+
+The alignment is only optional when parsing textual IR; for in-memory IR, it is
+always present. If unspecified, the alignment is assumed to be equal to the
 size of the '<value>' type. Note that this default alignment assumption is
 different from the alignment used for the load/store instructions when align
 isn't specified.
@@ -10559,6 +10681,9 @@ operation argument:
 - fsub: ``*ptr = *ptr - val`` (using floating point arithmetic)
 -  fmax: ``*ptr = maxnum(*ptr, val)`` (match the `llvm.maxnum.*`` intrinsic)
 -  fmin: ``*ptr = minnum(*ptr, val)`` (match the `llvm.minnum.*`` intrinsic)
+-  uinc_wrap: ``*ptr = (*ptr u>= val) ? 0 : (*ptr + 1)`` (increment value with wraparound to zero when incremented above input value)
+-  udec_wrap: ``*ptr = ((*ptr == 0) || (*ptr u> val)) ? val : (*ptr - 1)`` (decrement with wraparound to input value when decremented below zero).
+
 
 Example:
 """"""""
@@ -13706,6 +13831,7 @@ functions. These intrinsics allow source-language front-ends to pass
 information about the alignment of the pointer arguments to the code
 generator, providing opportunity for more efficient code generation.
 
+.. _int_abs:
 
 '``llvm.abs.*``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -15503,7 +15629,7 @@ support all bit widths or vector types, however.
 ::
 
       declare i8  @llvm.fshl.i8 (i8 %a, i8 %b, i8 %c)
-      declare i67 @llvm.fshl.i67(i67 %a, i67 %b, i67 %c)
+      declare i64 @llvm.fshl.i64(i64 %a, i64 %b, i64 %c)
       declare <2 x i32> @llvm.fshl.v2i32(<2 x i32> %a, <2 x i32> %b, <2 x i32> %c)
 
 Overview:
@@ -15551,7 +15677,7 @@ support all bit widths or vector types, however.
 ::
 
       declare i8  @llvm.fshr.i8 (i8 %a, i8 %b, i8 %c)
-      declare i67 @llvm.fshr.i67(i67 %a, i67 %b, i67 %c)
+      declare i64 @llvm.fshr.i64(i64 %a, i64 %b, i64 %c)
       declare <2 x i32> @llvm.fshr.v2i32(<2 x i32> %a, <2 x i32> %b, <2 x i32> %c)
 
 Overview:
@@ -17651,6 +17777,75 @@ Arguments:
 
 The argument to this intrinsic must be a vector.
 
+'``llvm.experimental.vector.deinterleave2``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic.
+
+::
+
+      declare {<2 x double>, <2 x double>} @llvm.experimental.vector.deinterleave2.v4f64(<4 x double> %vec1)
+      declare {<vscale x 4 x i32>, <vscale x 4 x i32>}  @llvm.experimental.vector.deinterleave2.nxv8i32(<vscale x 8 x i32> %vec1)
+
+Overview:
+"""""""""
+
+The '``llvm.experimental.vector.deinterleave2``' intrinsic constructs two
+vectors by deinterleaving the even and odd lanes of the input vector.
+
+This intrinsic works for both fixed and scalable vectors. While this intrinsic
+supports all vector types the recommended way to express this operation for
+fixed-width vectors is still to use a shufflevector, as that may allow for more
+optimization opportunities.
+
+For example:
+
+.. code-block:: text
+
+  {<2 x i64>, <2 x i64>} llvm.experimental.vector.deinterleave2.v4i64(<4 x i64> <i64 0, i64 1, i64 2, i64 3>); ==> {<2 x i64> <i64 0, i64 2>, <2 x i64> <i64 1, i64 3>}
+
+Arguments:
+""""""""""
+
+The argument is a vector whose type corresponds to the logical concatenation of
+the two result types.
+
+'``llvm.experimental.vector.interleave2``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic.
+
+::
+
+      declare <4 x double> @llvm.experimental.vector.interleave2.v4f64(<2 x double> %vec1, <2 x double> %vec2)
+      declare <vscale x 8 x i32> @llvm.experimental.vector.interleave2.nxv8i32(<vscale x 4 x i32> %vec1, <vscale x 4 x i32> %vec2)
+
+Overview:
+"""""""""
+
+The '``llvm.experimental.vector.interleave2``' intrinsic constructs a vector
+by interleaving two input vectors.
+
+This intrinsic works for both fixed and scalable vectors. While this intrinsic
+supports all vector types the recommended way to express this operation for
+fixed-width vectors is still to use a shufflevector, as that may allow for more
+optimization opportunities.
+
+For example:
+
+.. code-block:: text
+
+   <4 x i64> llvm.experimental.vector.interleave2.v4i64(<2 x i64> <i64 0, i64 2>, <2 x i64> <i64 1, i64 3>); ==> <4 x i64> <i64 0, i64 1, i64 2, i64 3>
+
+Arguments:
+""""""""""
+Both arguments must be vectors of the same type whereby their logical
+concatenation matches the result type.
+
 '``llvm.experimental.vector.splice``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -19010,6 +19205,56 @@ Examples:
 
       %t = xor <4 x i32> %a, %b
       %also.r = select <4 x i1> %mask, <4 x i32> %t, <4 x i32> poison
+
+.. _int_vp_abs:
+
+'``llvm.vp.abs.*``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic.
+
+::
+
+      declare <16 x i32>  @llvm.vp.abs.v16i32 (<16 x i32> <op>, <16 x i1> <mask>, i32 <vector_length>, i1 <is_int_min_poison>)
+      declare <vscale x 4 x i32>  @llvm.vp.abs.nxv4i32 (<vscale x 4 x i32> <op>, <vscale x 4 x i1> <mask>, i32 <vector_length>, i1 <is_int_min_poison>)
+      declare <256 x i64>  @llvm.vp.abs.v256i64 (<256 x i64> <op>, <256 x i1> <mask>, i32 <vector_length>, i1 <is_int_min_poison>)
+
+Overview:
+"""""""""
+
+Predicated abs of a vector of integers.
+
+
+Arguments:
+""""""""""
+
+The first operand and the result have the same vector of integer type. The
+second operand is the vector mask and has the same number of elements as the
+result vector type. The third operand is the explicit vector length of the
+operation. The fourth argument must be a constant and is a flag to indicate
+whether the result value of the '``llvm.vp.abs``' intrinsic is a
+:ref:`poison value <poisonvalues>` if the argument is statically or dynamically
+an ``INT_MIN`` value.
+
+Semantics:
+""""""""""
+
+The '``llvm.vp.abs``' intrinsic performs abs (:ref:`abs <int_abs>`) of the first operand on each
+enabled lane.  The result on disabled lanes is a :ref:`poison value <poisonvalues>`.
+
+Examples:
+"""""""""
+
+.. code-block:: llvm
+
+      %r = call <4 x i32> @llvm.vp.abs.v4i32(<4 x i32> %a, <4 x i1> %mask, i32 %evl, i1 false)
+      ;; For all lanes below %evl, %r is lane-wise equivalent to %also.r
+
+      %t = call <4 x i32> @llvm.abs.v4i32(<4 x i32> %a, i1 false)
+      %also.r = select <4 x i1> %mask, <4 x i32> %t, <4 x i32> poison
+
 
 
 .. _int_vp_smax:
@@ -24814,6 +25059,8 @@ Floating-Point Test Intrinsics
 These functions get properties of floating-point values.
 
 
+.. _llvm.is.fpclass:
+
 '``llvm.is.fpclass``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -24882,7 +25129,12 @@ if the element value satisfies the specified test. The argument ``test`` is a
 bit mask where each bit specifies floating-point class to test. For example, the
 value 0x108 makes test for normal value, - bits 3 and 8 in it are set, which
 means that the function returns ``true`` if ``op`` is a positive or negative
-normal value. The function never raises floating-point exceptions.
+normal value. The function never raises floating-point exceptions. The
+function does not canonicalize its input value and does not depend
+on the floating-point environment. If the floating-point environment
+has a zeroing treatment of subnormal input values (such as indicated
+by the ``"denormal-fp-math"`` attribute), a subnormal value will be
+observed (will not be implicitly treated as zero).
 
 
 General Intrinsics

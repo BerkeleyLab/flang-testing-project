@@ -272,6 +272,12 @@ bool isAllocatableType(mlir::Type ty) {
   return false;
 }
 
+bool isBoxNone(mlir::Type ty) {
+  if (auto box = ty.dyn_cast<fir::BoxType>())
+    return box.getEleTy().isa<mlir::NoneType>();
+  return false;
+}
+
 bool isBoxedRecordType(mlir::Type ty) {
   if (auto refTy = fir::dyn_cast_ptrEleTy(ty))
     ty = refTy;
@@ -280,6 +286,20 @@ bool isBoxedRecordType(mlir::Type ty) {
       return true;
     mlir::Type innerType = boxTy.unwrapInnerType();
     return innerType && innerType.isa<fir::RecordType>();
+  }
+  return false;
+}
+
+bool isScalarBoxedRecordType(mlir::Type ty) {
+  if (auto refTy = fir::dyn_cast_ptrEleTy(ty))
+    ty = refTy;
+  if (auto boxTy = ty.dyn_cast<fir::BaseBoxType>()) {
+    if (boxTy.getEleTy().isa<fir::RecordType>())
+      return true;
+    if (auto heapTy = boxTy.getEleTy().dyn_cast<fir::HeapType>())
+      return heapTy.getEleTy().isa<fir::RecordType>();
+    if (auto ptrTy = boxTy.getEleTy().dyn_cast<fir::PointerType>())
+      return ptrTy.getEleTy().isa<fir::RecordType>();
   }
   return false;
 }
@@ -326,6 +346,7 @@ mlir::Type unwrapInnerType(mlir::Type ty) {
           return seqTy.getEleTy();
         return eleTy;
       })
+      .Case<fir::RecordType>([](auto t) { return t; })
       .Default([](mlir::Type) { return mlir::Type{}; });
 }
 

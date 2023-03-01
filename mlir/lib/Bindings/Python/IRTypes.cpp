@@ -12,6 +12,7 @@
 
 #include "mlir-c/BuiltinAttributes.h"
 #include "mlir-c/BuiltinTypes.h"
+#include <optional>
 
 namespace py = pybind11;
 using namespace mlir;
@@ -135,6 +136,42 @@ public:
           return PyFloat8E5M2Type(context->getRef(), t);
         },
         py::arg("context") = py::none(), "Create a float8_e5m2 type.");
+  }
+};
+
+/// Floating Point Type subclass - Float8E4M3FNUZ.
+class PyFloat8E4M3FNUZType : public PyConcreteType<PyFloat8E4M3FNUZType> {
+public:
+  static constexpr IsAFunctionTy isaFunction = mlirTypeIsAFloat8E4M3FNUZ;
+  static constexpr const char *pyClassName = "Float8E4M3FNUZType";
+  using PyConcreteType::PyConcreteType;
+
+  static void bindDerived(ClassTy &c) {
+    c.def_static(
+        "get",
+        [](DefaultingPyMlirContext context) {
+          MlirType t = mlirFloat8E4M3FNUZTypeGet(context->get());
+          return PyFloat8E4M3FNUZType(context->getRef(), t);
+        },
+        py::arg("context") = py::none(), "Create a float8_e4m3fnuz type.");
+  }
+};
+
+/// Floating Point Type subclass - Float8E5M2FNUZ.
+class PyFloat8E5M2FNUZType : public PyConcreteType<PyFloat8E5M2FNUZType> {
+public:
+  static constexpr IsAFunctionTy isaFunction = mlirTypeIsAFloat8E5M2FNUZ;
+  static constexpr const char *pyClassName = "Float8E5M2FNUZType";
+  using PyConcreteType::PyConcreteType;
+
+  static void bindDerived(ClassTy &c) {
+    c.def_static(
+        "get",
+        [](DefaultingPyMlirContext context) {
+          MlirType t = mlirFloat8E5M2FNUZTypeGet(context->get());
+          return PyFloat8E5M2FNUZType(context->getRef(), t);
+        },
+        py::arg("context") = py::none(), "Create a float8_e5m2fnuz type.");
   }
 };
 
@@ -400,8 +437,7 @@ public:
     c.def_static(
         "get",
         [](std::vector<int64_t> shape, PyType &elementType,
-           llvm::Optional<PyAttribute> &encodingAttr,
-           DefaultingPyLocation loc) {
+           std::optional<PyAttribute> &encodingAttr, DefaultingPyLocation loc) {
           MlirType t = mlirRankedTensorTypeGetChecked(
               loc, shape.size(), shape.data(), elementType,
               encodingAttr ? encodingAttr->get() : mlirAttributeGetNull());
@@ -422,8 +458,7 @@ public:
         py::arg("encoding") = py::none(), py::arg("loc") = py::none(),
         "Create a ranked tensor type");
     c.def_property_readonly(
-        "encoding",
-        [](PyRankedTensorType &self) -> llvm::Optional<PyAttribute> {
+        "encoding", [](PyRankedTensorType &self) -> std::optional<PyAttribute> {
           MlirAttribute encoding = mlirRankedTensorTypeGetEncoding(self.get());
           if (mlirAttributeIsNull(encoding))
             return std::nullopt;
@@ -701,6 +736,8 @@ void mlir::python::populateIRTypes(py::module &m) {
   PyIndexType::bind(m);
   PyFloat8E4M3FNType::bind(m);
   PyFloat8E5M2Type::bind(m);
+  PyFloat8E4M3FNUZType::bind(m);
+  PyFloat8E5M2FNUZType::bind(m);
   PyBF16Type::bind(m);
   PyF16Type::bind(m);
   PyF32Type::bind(m);

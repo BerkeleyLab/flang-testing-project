@@ -1086,7 +1086,7 @@ static void GetBranchWeights(Instruction *TI,
 static void FitWeights(MutableArrayRef<uint64_t> Weights) {
   uint64_t Max = *std::max_element(Weights.begin(), Weights.end());
   if (Max > UINT_MAX) {
-    unsigned Offset = 32 - countLeadingZeros(Max);
+    unsigned Offset = 32 - llvm::countl_zero(Max);
     for (uint64_t &I : Weights)
       I >>= Offset;
   }
@@ -1595,12 +1595,13 @@ bool SimplifyCFGOpt::HoistThenElseCodeToIf(BranchInst *BI,
       if (!TTI.isProfitableToHoist(I1) || !TTI.isProfitableToHoist(I2))
         return Changed;
 
-      // If any of the two call sites has nomerge attribute, stop hoisting.
+      // If any of the two call sites has nomerge or convergent attribute, stop
+      // hoisting.
       if (const auto *CB1 = dyn_cast<CallBase>(I1))
-        if (CB1->cannotMerge())
+        if (CB1->cannotMerge() || CB1->isConvergent())
           return Changed;
       if (const auto *CB2 = dyn_cast<CallBase>(I2))
-        if (CB2->cannotMerge())
+        if (CB2->cannotMerge() || CB2->isConvergent())
           return Changed;
 
       if (isa<DbgInfoIntrinsic>(I1) || isa<DbgInfoIntrinsic>(I2)) {
@@ -1808,9 +1809,9 @@ static bool canSinkInstructions(
     // Conservatively return false if I is an inline-asm instruction. Sinking
     // and merging inline-asm instructions can potentially create arguments
     // that cannot satisfy the inline-asm constraints.
-    // If the instruction has nomerge attribute, return false.
+    // If the instruction has nomerge or convergent attribute, return false.
     if (const auto *C = dyn_cast<CallBase>(I))
-      if (C->isInlineAsm() || C->cannotMerge())
+      if (C->isInlineAsm() || C->cannotMerge() || C->isConvergent())
         return false;
 
     // Each instruction must have zero or one use.
@@ -5184,7 +5185,9 @@ bool SimplifyCFGOpt::simplifyUnreachable(UnreachableInst *UI) {
           DTU->applyUpdates(Updates);
           Updates.clear();
         }
-        removeUnwindEdge(TI->getParent(), DTU);
+        auto *CI = cast<CallInst>(removeUnwindEdge(TI->getParent(), DTU));
+        if (!CI->doesNotThrow())
+          CI->setDoesNotThrow();
         Changed = true;
       }
     } else if (auto *CSI = dyn_cast<CatchSwitchInst>(TI)) {
@@ -5451,7 +5454,7 @@ static bool eliminateDeadSwitchCases(SwitchInst *SI, DomTreeUpdater *DTU,
     }
     const APInt &CaseVal = Case.getCaseValue()->getValue();
     if (Known.Zero.intersects(CaseVal) || !Known.One.isSubsetOf(CaseVal) ||
-        (CaseVal.getMinSignedBits() > MaxSignificantBitsInCond)) {
+        (CaseVal.getSignificantBits() > MaxSignificantBitsInCond)) {
       DeadCases.push_back(Case.getCaseValue());
       if (DTU)
         --NumPerSuccessorCases[Successor];
@@ -5467,7 +5470,7 @@ static bool eliminateDeadSwitchCases(SwitchInst *SI, DomTreeUpdater *DTU,
   bool HasDefault =
       !isa<UnreachableInst>(SI->getDefaultDest()->getFirstNonPHIOrDbg());
   const unsigned NumUnknownBits =
-      Known.getBitWidth() - (Known.Zero | Known.One).countPopulation();
+      Known.getBitWidth() - (Known.Zero | Known.One).popcount();
   assert(NumUnknownBits <= Known.getBitWidth());
   if (HasDefault && DeadCases.empty() &&
       NumUnknownBits < 64 /* avoid overflow */ &&
@@ -5858,7 +5861,7 @@ static Value *foldSwitchToSelect(const SwitchCaseResultVectorTy &ResultVector,
 
       // Check if cases with the same result can cover all number
       // in touched bits.
-      if (BitMask.countPopulation() == Log2_32(CaseCount)) {
+      if (BitMask.popcount() == Log2_32(CaseCount)) {
         if (!MinCaseVal->isNullValue())
           Condition = Builder.CreateSub(Condition, MinCaseVal);
         Value *And = Builder.CreateAnd(Condition, ~BitMask, "switch.and");
@@ -6119,7 +6122,7 @@ SwitchLookupTable::SwitchLookupTable(
   Array->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   // Set the alignment to that of an array items. We will be only loading one
   // value out of it.
-  Array->setAlignment(Align(DL.getPrefTypeAlignment(ValueType)));
+  Array->setAlignment(DL.getPrefTypeAlign(ValueType));
   Kind = ArrayKind;
 }
 
@@ -6692,7 +6695,7 @@ static bool ReduceSwitchRange(SwitchInst *SI, IRBuilder<> &Builder,
   // less than 64.
   unsigned Shift = 64;
   for (auto &V : Values)
-    Shift = std::min(Shift, countTrailingZeros((uint64_t)V));
+    Shift = std::min(Shift, (unsigned)llvm::countr_zero((uint64_t)V));
   assert(Shift < 64);
   if (Shift > 0)
     for (auto &V : Values)
@@ -7119,10 +7122,33 @@ static bool passingValueIsAlwaysUndefined(Value *V, Instruction *I, bool PtrValu
     // Look through GEPs. A load from a GEP derived from NULL is still undefined
     if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(Use))
       if (GEP->getPointerOperand() == I) {
-        if (!GEP->isInBounds() || !GEP->hasAllZeroIndices())
+        // The current base address is null, there are four cases to consider:
+        // getelementptr (TY, null, 0)                 -> null
+        // getelementptr (TY, null, not zero)          -> may be modified
+        // getelementptr inbounds (TY, null, 0)        -> null
+        // getelementptr inbounds (TY, null, not zero) -> poison iff null is
+        // undefined?
+        if (!GEP->hasAllZeroIndices() &&
+            (!GEP->isInBounds() ||
+             NullPointerIsDefined(GEP->getFunction(),
+                                  GEP->getPointerAddressSpace())))
           PtrValueMayBeModified = true;
         return passingValueIsAlwaysUndefined(V, GEP, PtrValueMayBeModified);
       }
+
+    // Look through return.
+    if (ReturnInst *Ret = dyn_cast<ReturnInst>(Use)) {
+      bool HasNoUndefAttr =
+          Ret->getFunction()->hasRetAttribute(Attribute::NoUndef);
+      // Return undefined to a noundef return value is undefined.
+      if (isa<UndefValue>(C) && HasNoUndefAttr)
+        return true;
+      // Return null to a nonnull+noundef return value is undefined.
+      if (C->isNullValue() && HasNoUndefAttr &&
+          Ret->getFunction()->hasRetAttribute(Attribute::NonNull)) {
+        return !PtrValueMayBeModified;
+      }
+    }
 
     // Look through bitcasts.
     if (BitCastInst *BC = dyn_cast<BitCastInst>(Use))

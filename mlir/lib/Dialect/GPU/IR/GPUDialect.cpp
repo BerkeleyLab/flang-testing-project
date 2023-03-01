@@ -42,8 +42,16 @@ int64_t GPUBlockMappingAttr::getMappingId() const {
   return static_cast<int64_t>(getBlock());
 }
 
+int64_t GPUWarpMappingAttr::getMappingId() const {
+  return static_cast<int64_t>(getWarp());
+}
+
 int64_t GPUThreadMappingAttr::getMappingId() const {
   return static_cast<int64_t>(getThread());
+}
+
+int64_t GPUMemorySpaceMappingAttr::getMappingId() const {
+  return static_cast<int64_t>(getAddressSpace());
 }
 
 //===----------------------------------------------------------------------===//
@@ -74,7 +82,9 @@ Type MMAMatrixType::getElementType() const { return getImpl()->elementType; }
 StringRef MMAMatrixType::getOperand() const { return getImpl()->getOperand(); }
 
 bool MMAMatrixType::isValidElementType(Type elementType) {
-  return elementType.isF16() || elementType.isF32();
+  return elementType.isF16() || elementType.isF32() ||
+         elementType.isUnsignedInteger(8) || elementType.isSignedInteger(8) ||
+         elementType.isInteger(32);
 }
 
 LogicalResult
@@ -89,7 +99,8 @@ MMAMatrixType::verify(function_ref<InFlightDiagnostic()> emitError,
     return emitError() << "MMAMatrixType must have exactly two dimensions";
 
   if (!MMAMatrixType::isValidElementType(elementType))
-    return emitError() << "MMAMatrixType elements must be F16 or F32";
+    return emitError()
+           << "MMAMatrixType elements must be SI8, UI8, I32, F16, or F32";
 
   return success();
 }
@@ -122,8 +133,7 @@ struct GPUInlinerInterface : public DialectInlinerInterface {
   using DialectInlinerInterface::DialectInlinerInterface;
 
   /// All gpu dialect ops can be inlined.
-  bool isLegalToInline(Operation *, Region *, bool,
-                       BlockAndValueMapping &) const final {
+  bool isLegalToInline(Operation *, Region *, bool, IRMapping &) const final {
     return true;
   }
 };
@@ -794,15 +804,13 @@ static ParseResult parseLaunchFuncOperands(
   if (parser.parseOptionalKeyword("args"))
     return success();
 
-  SmallVector<OpAsmParser::Argument> args;
-  if (parser.parseArgumentList(args, OpAsmParser::Delimiter::Paren,
-                               /*allowType=*/true))
-    return failure();
-  for (auto &arg : args) {
-    argNames.push_back(arg.ssaName);
-    argTypes.push_back(arg.type);
-  }
-  return success();
+  auto parseElement = [&]() -> ParseResult {
+    return failure(parser.parseOperand(argNames.emplace_back()) ||
+                   parser.parseColonType(argTypes.emplace_back()));
+  };
+
+  return parser.parseCommaSeparatedList(OpAsmParser::Delimiter::Paren,
+                                        parseElement, " in argument list");
 }
 
 static void printLaunchFuncOperands(OpAsmPrinter &printer, Operation *,
@@ -1016,16 +1024,22 @@ LogicalResult GPUFuncOp::verifyType() {
 
 static LogicalResult verifyAttributions(Operation *op,
                                         ArrayRef<BlockArgument> attributions,
-                                        unsigned memorySpace) {
+                                        gpu::AddressSpace memorySpace) {
   for (Value v : attributions) {
     auto type = v.getType().dyn_cast<MemRefType>();
     if (!type)
       return op->emitOpError() << "expected memref type in attribution";
 
-    if (type.getMemorySpaceAsInt() != memorySpace) {
+    // We can only verify the address space if it hasn't already been lowered
+    // from the AddressSpaceAttr to a target-specific numeric value.
+    auto addressSpace =
+        type.getMemorySpace().dyn_cast_or_null<gpu::AddressSpaceAttr>();
+    if (!addressSpace)
+      continue;
+    if (addressSpace.getValue() != memorySpace)
       return op->emitOpError()
-             << "expected memory space " << memorySpace << " in attribution";
-    }
+             << "expected memory space " << stringifyAddressSpace(memorySpace)
+             << " in attribution";
   }
   return success();
 }
@@ -1286,12 +1300,12 @@ LogicalResult SubgroupMmaComputeOp::verify() {
   return success();
 }
 
-LogicalResult MemcpyOp::fold(ArrayRef<Attribute> operands,
+LogicalResult MemcpyOp::fold(FoldAdaptor adaptor,
                              SmallVectorImpl<::mlir::OpFoldResult> &results) {
   return memref::foldMemRefCast(*this);
 }
 
-LogicalResult MemsetOp::fold(ArrayRef<Attribute> operands,
+LogicalResult MemsetOp::fold(FoldAdaptor adaptor,
                              SmallVectorImpl<::mlir::OpFoldResult> &results) {
   return memref::foldMemRefCast(*this);
 }
@@ -1323,7 +1337,7 @@ public:
         continue;
       validOperands.push_back(operand);
     }
-    op->setOperands(validOperands);
+    rewriter.updateRootInPlace(op, [&]() { op->setOperands(validOperands); });
     return success();
   }
 };

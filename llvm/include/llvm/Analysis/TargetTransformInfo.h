@@ -162,7 +162,35 @@ public:
   bool skipScalarizationCost() const { return ScalarizationCost.isValid(); }
 };
 
-enum class PredicationStyle { None, Data, DataAndControlFlow };
+enum class TailFoldingStyle {
+  /// Don't use tail folding
+  None,
+  /// Use predicate only to mask operations on data in the loop.
+  /// When the VL is not known to be a power-of-2, this method requires a
+  /// runtime overflow check for the i + VL in the loop because it compares the
+  /// scalar induction variable against the tripcount rounded up by VL which may
+  /// overflow. When the VL is a power-of-2, both the increment and uprounded
+  /// tripcount will overflow to 0, which does not require a runtime check
+  /// since the loop is exited when the loop induction variable equals the
+  /// uprounded trip-count, which are both 0.
+  Data,
+  /// Same as Data, but avoids using the get.active.lane.mask intrinsic to
+  /// calculate the mask and instead implements this with a
+  /// splat/stepvector/cmp.
+  /// FIXME: Can this kind be removed now that SelectionDAGBuilder expands the
+  /// active.lane.mask intrinsic when it is not natively supported?
+  DataWithoutLaneMask,
+  /// Use predicate to control both data and control flow.
+  /// This method always requires a runtime overflow check for the i + VL
+  /// increment inside the loop, because it uses the result direclty in the
+  /// active.lane.mask to calculate the mask for the next iteration. If the
+  /// increment overflows, the mask is no longer correct.
+  DataAndControlFlow,
+  /// Use predicate to control both data and control flow, but modify
+  /// the trip count so that a runtime overflow check can be avoided
+  /// and such that the scalar epilogue loop can always be removed.
+  DataAndControlFlowWithoutRuntimeCheck
+};
 
 class TargetTransformInfo;
 typedef TargetTransformInfo TTI;
@@ -516,13 +544,14 @@ public:
                                    LoopVectorizationLegality *LVL,
                                    InterleavedAccessInfo *IAI) const;
 
-  /// Query the target whether lowering of the llvm.get.active.lane.mask
-  /// intrinsic is supported and how the mask should be used. A return value
-  /// of PredicationStyle::Data indicates the mask is used as data only,
-  /// whereas PredicationStyle::DataAndControlFlow indicates we should also use
-  /// the mask for control flow in the loop. If unsupported the return value is
-  /// PredicationStyle::None.
-  PredicationStyle emitGetActiveLaneMask() const;
+  /// Query the target what the preferred style of tail folding is.
+  /// \param IVUpdateMayOverflow Tells whether it is known if the IV update
+  /// may (or will never) overflow for the suggested VF/UF in the given loop.
+  /// Targets can use this information to select a more optimal tail folding
+  /// style. The value conservatively defaults to true, such that no assumptions
+  /// are made on overflow.
+  TailFoldingStyle
+  getPreferredTailFoldingStyle(bool IVUpdateMayOverflow = true) const;
 
   // Parameters that control the loop peeling transformation
   struct PeelingPreferences {
@@ -752,13 +781,16 @@ public:
   /// extracted from vectors.
   InstructionCost getScalarizationOverhead(VectorType *Ty,
                                            const APInt &DemandedElts,
-                                           bool Insert, bool Extract) const;
+                                           bool Insert, bool Extract,
+                                           TTI::TargetCostKind CostKind) const;
 
   /// Estimate the overhead of scalarizing an instructions unique
   /// non-constant operands. The (potentially vector) types to use for each of
   /// argument are passes via Tys.
-  InstructionCost getOperandsScalarizationOverhead(ArrayRef<const Value *> Args,
-                                                   ArrayRef<Type *> Tys) const;
+  InstructionCost
+  getOperandsScalarizationOverhead(ArrayRef<const Value *> Args,
+                                   ArrayRef<Type *> Tys,
+                                   TTI::TargetCostKind CostKind) const;
 
   /// If target has efficient vector element load/store instructions, it can
   /// return true here so that insertion/extraction costs are not added to
@@ -1074,7 +1106,7 @@ public:
   /// \return The maximum interleave factor that any transform should try to
   /// perform for this target. This number depends on the level of parallelism
   /// and the number of execution units in the CPU.
-  unsigned getMaxInterleaveFactor(unsigned VF) const;
+  unsigned getMaxInterleaveFactor(ElementCount VF) const;
 
   /// Collect properties of V used in cost analysis, e.g. OP_PowerOf2.
   static OperandValueInfo getOperandInfo(const Value *V);
@@ -1193,7 +1225,9 @@ public:
   /// case is to provision the cost of vectorization/scalarization in
   /// vectorizer passes.
   InstructionCost getVectorInstrCost(unsigned Opcode, Type *Val,
-                                     unsigned Index = -1) const;
+                                     TTI::TargetCostKind CostKind,
+                                     unsigned Index = -1, Value *Op0 = nullptr,
+                                     Value *Op1 = nullptr) const;
 
   /// \return The expected cost of vector Insert and Extract.
   /// This is used when instruction is available, and implementation
@@ -1202,6 +1236,7 @@ public:
   /// A typical suitable use case is cost estimation when vector instruction
   /// exists (e.g., from basic blocks during transformation).
   InstructionCost getVectorInstrCost(const Instruction &I, Type *Val,
+                                     TTI::TargetCostKind CostKind,
                                      unsigned Index = -1) const;
 
   /// \return The cost of replication shuffle of \p VF elements typed \p EltTy
@@ -1545,6 +1580,17 @@ public:
   VPLegalization getVPLegalizationStrategy(const VPIntrinsic &PI) const;
   /// @}
 
+  /// \returns Whether a 32-bit branch instruction is available in Arm or Thumb
+  /// state.
+  ///
+  /// Used by the LowerTypeTests pass, which constructs an IR inline assembler
+  /// node containing a jump table in a format suitable for the target, so it
+  /// needs to know what format of jump table it can legally use.
+  ///
+  /// For non-Arm targets, this function isn't used. It defaults to returning
+  /// false, but it shouldn't matter what it returns anyway.
+  bool hasArmWideBranch(bool Thumb) const;
+
   /// @}
 
 private:
@@ -1610,7 +1656,8 @@ public:
                               AssumptionCache &AC, TargetLibraryInfo *TLI,
                               DominatorTree *DT, LoopVectorizationLegality *LVL,
                               InterleavedAccessInfo *IAI) = 0;
-  virtual PredicationStyle emitGetActiveLaneMask() = 0;
+  virtual TailFoldingStyle
+  getPreferredTailFoldingStyle(bool IVUpdateMayOverflow = true) = 0;
   virtual std::optional<Instruction *> instCombineIntrinsic(
       InstCombiner &IC, IntrinsicInst &II) = 0;
   virtual std::optional<Value *> simplifyDemandedUseBitsIntrinsic(
@@ -1674,11 +1721,12 @@ public:
   virtual bool useColdCCForColdCall(Function &F) = 0;
   virtual InstructionCost getScalarizationOverhead(VectorType *Ty,
                                                    const APInt &DemandedElts,
-                                                   bool Insert,
-                                                   bool Extract) = 0;
+                                                   bool Insert, bool Extract,
+                                                   TargetCostKind CostKind) = 0;
   virtual InstructionCost
   getOperandsScalarizationOverhead(ArrayRef<const Value *> Args,
-                                   ArrayRef<Type *> Tys) = 0;
+                                   ArrayRef<Type *> Tys,
+                                   TargetCostKind CostKind) = 0;
   virtual bool supportsEfficientVectorElementLoadStore() = 0;
   virtual bool supportsTailCalls() = 0;
   virtual bool supportsTailCallFor(const CallBase *CB) = 0;
@@ -1759,7 +1807,7 @@ public:
   /// \return if target want to issue a prefetch in address space \p AS.
   virtual bool shouldPrefetchAddressSpace(unsigned AS) const = 0;
 
-  virtual unsigned getMaxInterleaveFactor(unsigned VF) = 0;
+  virtual unsigned getMaxInterleaveFactor(ElementCount VF) = 0;
   virtual InstructionCost getArithmeticInstrCost(
       unsigned Opcode, Type *Ty, TTI::TargetCostKind CostKind,
       OperandValueInfo Opd1Info, OperandValueInfo Opd2Info,
@@ -1786,8 +1834,11 @@ public:
                                              TTI::TargetCostKind CostKind,
                                              const Instruction *I) = 0;
   virtual InstructionCost getVectorInstrCost(unsigned Opcode, Type *Val,
-                                             unsigned Index) = 0;
+                                             TTI::TargetCostKind CostKind,
+                                             unsigned Index, Value *Op0,
+                                             Value *Op1) = 0;
   virtual InstructionCost getVectorInstrCost(const Instruction &I, Type *Val,
+                                             TTI::TargetCostKind CostKind,
                                              unsigned Index) = 0;
 
   virtual InstructionCost
@@ -1898,6 +1949,7 @@ public:
                                      Align Alignment) const = 0;
   virtual VPLegalization
   getVPLegalizationStrategy(const VPIntrinsic &PI) const = 0;
+  virtual bool hasArmWideBranch(bool Thumb) const = 0;
 };
 
 template <typename T>
@@ -2006,8 +2058,9 @@ public:
                                    InterleavedAccessInfo *IAI) override {
     return Impl.preferPredicateOverEpilogue(L, LI, SE, AC, TLI, DT, LVL, IAI);
   }
-  PredicationStyle emitGetActiveLaneMask() override {
-    return Impl.emitGetActiveLaneMask();
+  TailFoldingStyle
+  getPreferredTailFoldingStyle(bool IVUpdateMayOverflow = true) override {
+    return Impl.getPreferredTailFoldingStyle(IVUpdateMayOverflow);
   }
   std::optional<Instruction *>
   instCombineIntrinsic(InstCombiner &IC, IntrinsicInst &II) override {
@@ -2148,13 +2201,16 @@ public:
 
   InstructionCost getScalarizationOverhead(VectorType *Ty,
                                            const APInt &DemandedElts,
-                                           bool Insert, bool Extract) override {
-    return Impl.getScalarizationOverhead(Ty, DemandedElts, Insert, Extract);
+                                           bool Insert, bool Extract,
+                                           TargetCostKind CostKind) override {
+    return Impl.getScalarizationOverhead(Ty, DemandedElts, Insert, Extract,
+                                         CostKind);
   }
   InstructionCost
   getOperandsScalarizationOverhead(ArrayRef<const Value *> Args,
-                                   ArrayRef<Type *> Tys) override {
-    return Impl.getOperandsScalarizationOverhead(Args, Tys);
+                                   ArrayRef<Type *> Tys,
+                                   TargetCostKind CostKind) override {
+    return Impl.getOperandsScalarizationOverhead(Args, Tys, CostKind);
   }
 
   bool supportsEfficientVectorElementLoadStore() override {
@@ -2312,7 +2368,7 @@ public:
     return Impl.shouldPrefetchAddressSpace(AS);
   }
 
-  unsigned getMaxInterleaveFactor(unsigned VF) override {
+  unsigned getMaxInterleaveFactor(ElementCount VF) override {
     return Impl.getMaxInterleaveFactor(VF);
   }
   unsigned getEstimatedNumberOfCaseClusters(const SwitchInst &SI,
@@ -2359,12 +2415,15 @@ public:
     return Impl.getCmpSelInstrCost(Opcode, ValTy, CondTy, VecPred, CostKind, I);
   }
   InstructionCost getVectorInstrCost(unsigned Opcode, Type *Val,
-                                     unsigned Index) override {
-    return Impl.getVectorInstrCost(Opcode, Val, Index);
+                                     TTI::TargetCostKind CostKind,
+                                     unsigned Index, Value *Op0,
+                                     Value *Op1) override {
+    return Impl.getVectorInstrCost(Opcode, Val, CostKind, Index, Op0, Op1);
   }
   InstructionCost getVectorInstrCost(const Instruction &I, Type *Val,
+                                     TTI::TargetCostKind CostKind,
                                      unsigned Index) override {
-    return Impl.getVectorInstrCost(I, Val, Index);
+    return Impl.getVectorInstrCost(I, Val, CostKind, Index);
   }
   InstructionCost
   getReplicationShuffleCost(Type *EltTy, int ReplicationFactor, int VF,
@@ -2570,6 +2629,10 @@ public:
   VPLegalization
   getVPLegalizationStrategy(const VPIntrinsic &PI) const override {
     return Impl.getVPLegalizationStrategy(PI);
+  }
+
+  bool hasArmWideBranch(bool Thumb) const override {
+    return Impl.hasArmWideBranch(Thumb);
   }
 };
 

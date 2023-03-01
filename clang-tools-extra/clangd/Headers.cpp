@@ -16,9 +16,11 @@
 #include "clang/Lex/PPCallbacks.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Tooling/Inclusions/HeaderAnalysis.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Path.h"
 #include <cstring>
+#include <optional>
 
 namespace clang {
 namespace clangd {
@@ -72,6 +74,8 @@ public:
               IDs.push_back(HID);
           }
       }
+      Out->MainFileIncludesBySpelling.try_emplace(Inc.Written)
+          .first->second.push_back(Out->MainFileIncludes.size() - 1);
     }
 
     // Record include graph (not just for main-file includes)
@@ -234,7 +238,7 @@ void IncludeStructure::collect(const CompilerInstance &CI) {
   CI.getPreprocessor().addPPCallbacks(std::move(Collector));
 }
 
-llvm::Optional<IncludeStructure::HeaderID>
+std::optional<IncludeStructure::HeaderID>
 IncludeStructure::getID(const FileEntry *Entry) const {
   // HeaderID of the main file is always 0;
   if (Entry == MainFileEntry) {
@@ -293,6 +297,14 @@ IncludeStructure::includeDepth(HeaderID Root) const {
   return Result;
 }
 
+llvm::SmallVector<const Inclusion *>
+IncludeStructure::mainFileIncludesWithSpelling(llvm::StringRef Spelling) const {
+  llvm::SmallVector<const Inclusion *> Includes;
+  for (auto Idx : MainFileIncludesBySpelling.lookup(Spelling))
+    Includes.push_back(&MainFileIncludes[Idx]);
+  return Includes;
+}
+
 void IncludeInserter::addExisting(const Inclusion &Inc) {
   IncludedHeaders.insert(Inc.Written);
   if (!Inc.Resolved.empty())
@@ -314,7 +326,7 @@ bool IncludeInserter::shouldInsertInclude(
   return !Included(DeclaringHeader) && !Included(InsertedHeader.File);
 }
 
-llvm::Optional<std::string>
+std::optional<std::string>
 IncludeInserter::calculateIncludePath(const HeaderFile &InsertedHeader,
                                       llvm::StringRef IncludingFile) const {
   assert(InsertedHeader.valid());
@@ -344,10 +356,10 @@ IncludeInserter::calculateIncludePath(const HeaderFile &InsertedHeader,
   return Suggested;
 }
 
-llvm::Optional<TextEdit>
+std::optional<TextEdit>
 IncludeInserter::insert(llvm::StringRef VerbatimHeader,
                         tooling::IncludeDirective Directive) const {
-  llvm::Optional<TextEdit> Edit;
+  std::optional<TextEdit> Edit;
   if (auto Insertion =
           Inserter.insert(VerbatimHeader.trim("\"<>"),
                           VerbatimHeader.startswith("<"), Directive))

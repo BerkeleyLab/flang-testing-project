@@ -30,6 +30,7 @@
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/TypoCorrection.h"
 #include "llvm/ADT/SmallVector.h"
+#include <optional>
 using namespace clang;
 
 /// Simple precedence-based parser for binary/ternary operators.
@@ -1006,8 +1007,8 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
     if (getLangOpts().CPlusPlus)
       Diag(Tok, diag::warn_cxx98_compat_nullptr);
     else
-      Diag(Tok, getLangOpts().C2x ? diag::warn_c17_compat_nullptr
-                                  : diag::ext_c_nullptr);
+      Diag(Tok, getLangOpts().C2x ? diag::warn_c2x_compat_keyword
+                                  : diag::ext_c_nullptr) << Tok.getName();
 
     Res = Actions.ActOnCXXNullPtrLiteral(ConsumeToken());
     break;
@@ -2483,8 +2484,11 @@ ExprResult Parser::ParseUnaryExprOrTypeTraitExpression() {
                                                 RParenLoc);
   }
 
-  if (OpTok.isOneOf(tok::kw_alignof, tok::kw__Alignof))
+  if (getLangOpts().CPlusPlus &&
+      OpTok.isOneOf(tok::kw_alignof, tok::kw__Alignof))
     Diag(OpTok, diag::warn_cxx98_compat_alignof);
+  else if (getLangOpts().C2x && OpTok.is(tok::kw_alignof))
+    Diag(OpTok, diag::warn_c2x_compat_keyword) << OpTok.getName();
 
   EnterExpressionEvaluationContext Unevaluated(
       Actions, Sema::ExpressionEvaluationContext::Unevaluated,
@@ -2591,10 +2595,21 @@ ExprResult Parser::ParseBuiltinPrimaryExpression() {
   }
   case tok::kw___builtin_offsetof: {
     SourceLocation TypeLoc = Tok.getLocation();
-    TypeResult Ty = ParseTypeName();
-    if (Ty.isInvalid()) {
-      SkipUntil(tok::r_paren, StopAtSemi);
-      return ExprError();
+    auto OOK = Sema::OffsetOfKind::OOK_Builtin;
+    if (Tok.getLocation().isMacroID()) {
+      StringRef MacroName = Lexer::getImmediateMacroNameForDiagnostics(
+          Tok.getLocation(), PP.getSourceManager(), getLangOpts());
+      if (MacroName == "offsetof")
+        OOK = Sema::OffsetOfKind::OOK_Macro;
+    }
+    TypeResult Ty;
+    {
+      OffsetOfStateRAIIObject InOffsetof(*this, OOK);
+      Ty = ParseTypeName();
+      if (Ty.isInvalid()) {
+        SkipUntil(tok::r_paren, StopAtSemi);
+        return ExprError();
+      }
     }
 
     if (ExpectAndConsume(tok::comma)) {
@@ -2632,7 +2647,6 @@ ExprResult Parser::ParseBuiltinPrimaryExpression() {
         }
         Comps.back().U.IdentInfo = Tok.getIdentifierInfo();
         Comps.back().LocEnd = ConsumeToken();
-
       } else if (Tok.is(tok::l_square)) {
         if (CheckProhibitedCXX11Attribute())
           return ExprError();
@@ -3694,7 +3708,7 @@ static bool CheckAvailabilitySpecList(Parser &P,
 ///  availability-spec:
 ///     '*'
 ///     identifier version-tuple
-Optional<AvailabilitySpec> Parser::ParseAvailabilitySpec() {
+std::optional<AvailabilitySpec> Parser::ParseAvailabilitySpec() {
   if (Tok.is(tok::star)) {
     return AvailabilitySpec(ConsumeToken());
   } else {
@@ -3746,7 +3760,7 @@ ExprResult Parser::ParseAvailabilityCheckExpr(SourceLocation BeginLoc) {
   SmallVector<AvailabilitySpec, 4> AvailSpecs;
   bool HasError = false;
   while (true) {
-    Optional<AvailabilitySpec> Spec = ParseAvailabilitySpec();
+    std::optional<AvailabilitySpec> Spec = ParseAvailabilitySpec();
     if (!Spec)
       HasError = true;
     else

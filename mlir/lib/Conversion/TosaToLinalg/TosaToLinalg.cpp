@@ -598,7 +598,7 @@ elementwiseMatchAndRewriteHelper(Operation *operation,
     if (newShape.size() != rank) {
       operand = rewriter.create<tosa::ReshapeOp>(
           loc, RankedTensorType::get(newShape, type.getElementType()), operand,
-          rewriter.getI64ArrayAttr(newShape));
+          rewriter.getDenseI64ArrayAttr(newShape));
     }
 
     operands.push_back(operand);
@@ -963,11 +963,6 @@ public:
           reshape, "Cannot collapse dynamic dims to more than one dimension");
     }
 
-    if (operandTy == resultTy) {
-      rewriter.replaceOp(reshape, adaptor.getOperands()[0]);
-      return success();
-    }
-
     SmallVector<ReassociationExprs, 4> reassociationMap;
     if (!createReassociationMapsForCollapse(rewriter, operandTy.getShape(),
                                             resultTy.getShape(),
@@ -1000,11 +995,6 @@ public:
     ShapedType operandTy = adaptor.getInput1().getType().cast<ShapedType>();
     ShapedType resultTy = reshape.getType().template cast<ShapedType>();
     bool isDynamic = !operandTy.hasStaticShape();
-
-    if (operandTy == resultTy) {
-      rewriter.replaceOp(reshape, adaptor.getOperands()[0]);
-      return success();
-    }
 
     if (isDynamic && operandTy.getRank() != 1) {
       return rewriter.notifyMatchFailure(
@@ -1044,11 +1034,6 @@ public:
     ShapedType operandTy = adaptor.getInput1().getType().cast<ShapedType>();
     ShapedType resultTy = reshape.getType().template cast<ShapedType>();
     bool isDynamic = !operandTy.hasStaticShape();
-
-    if (operandTy == resultTy) {
-      rewriter.replaceOp(reshape, adaptor.getOperands()[0]);
-      return success();
-    }
 
     SmallVector<int64_t> intermediateShape;
     if (!findIntermediateShape(resultTy.getShape(), operandTy.getShape(),
@@ -1146,11 +1131,8 @@ public:
     }
 
     // The shift and multiplier values.
-    SmallVector<int32_t> multiplierValues;
-    getValuesFromIntArrayAttribute(op.getMultiplier(), multiplierValues);
-
-    SmallVector<int8_t> shiftValues;
-    getValuesFromIntArrayAttribute(op.getShift(), shiftValues);
+    SmallVector<int32_t> multiplierValues(op.getMultiplier());
+    SmallVector<int8_t> shiftValues(op.getShift());
 
     // If we shift by more than the bitwidth, this just sets to 0.
     for (int i = 0, s = multiplierValues.size(); i < s; i++) {
@@ -1902,7 +1884,7 @@ public:
         [&](OpBuilder &nestedBuilder, Location nestedLoc, ValueRange args) {
           llvm::SmallVector<Value> indices;
           for (unsigned int i = 0; i < inputTy.getRank(); i++) {
-            auto index =
+            Value index =
                 rewriter.create<linalg::IndexOp>(nestedLoc, i).getResult();
             if (i == axis) {
               auto one = rewriter.create<arith::ConstantIndexOp>(nestedLoc, 1);
@@ -1942,8 +1924,7 @@ struct TileConverter : public OpConversionPattern<tosa::TileOp> {
     auto elementTy = inputTy.getElementType();
     int64_t rank = inputTy.getRank();
 
-    SmallVector<int64_t> multiples;
-    getValuesFromIntArrayAttribute(op.getMultiples(), multiples);
+    ArrayRef<int64_t> multiples = op.getMultiples();
 
     // Broadcast the newly added dimensions to their appropriate multiple.
     SmallVector<int64_t, 2> genericShape;
@@ -1986,7 +1967,7 @@ struct TileConverter : public OpConversionPattern<tosa::TileOp> {
 
     rewriter.replaceOpWithNewOp<tosa::ReshapeOp>(
         op, resultTy, genericOp.getResult(0),
-        rewriter.getI64ArrayAttr(resultTy.getShape()));
+        rewriter.getDenseI64ArrayAttr(resultTy.getShape()));
     return success();
   }
 };
@@ -2314,6 +2295,13 @@ void mlir::tosa::populateTosaToLinalgConversionPatterns(
   patterns->add<MaterializeResizeBroadcast>(patterns->getContext(),
                                             /*benefit=*/300);
 
+  patterns->add<ReshapeConverterCollapse>(patterns->getContext(),
+                                          /*benefit=*/100);
+  patterns->add<ReshapeConverterExpand>(patterns->getContext(),
+                                        /*benefit=*/200);
+  patterns->add<ReshapeConverterCollapseExpand>(patterns->getContext(),
+                                                /*benefit=*/300);
+
   patterns->add<
       // clang-format off
       PointwiseConverter<tosa::AddOp>,
@@ -2361,9 +2349,6 @@ void mlir::tosa::populateTosaToLinalgConversionPatterns(
       ArgMaxConverter,
       ConcatConverter,
       GatherConverter,
-      ReshapeConverterCollapse,
-      ReshapeConverterExpand,
-      ReshapeConverterCollapseExpand,
       RescaleConverter,
       ReverseConverter,
       TableConverter,

@@ -293,9 +293,6 @@ class SelectionDAG {
   /// benefits (see discussion with @thakis in D120714).
   uint16_t NextPersistentId = 0;
 
-  /// Are instruction referencing variable locations desired for this function?
-  bool UseInstrRefDebugInfo = false;
-
 public:
   /// Clients of various APIs that cause global effects on
   /// the DAG can optionally implement this interface.  This allows the clients
@@ -783,7 +780,7 @@ public:
     SDVTList VTs = getVTList(MVT::Other, MVT::Glue);
     SDValue Ops[] = { Chain, getRegister(Reg, N.getValueType()), N, Glue };
     return getNode(ISD::CopyToReg, dl, VTs,
-                   makeArrayRef(Ops, Glue.getNode() ? 4 : 3));
+                   ArrayRef(Ops, Glue.getNode() ? 4 : 3));
   }
 
   // Similar to last getCopyToReg() except parameter Reg is a SDValue
@@ -792,7 +789,7 @@ public:
     SDVTList VTs = getVTList(MVT::Other, MVT::Glue);
     SDValue Ops[] = { Chain, Reg, N, Glue };
     return getNode(ISD::CopyToReg, dl, VTs,
-                   makeArrayRef(Ops, Glue.getNode() ? 4 : 3));
+                   ArrayRef(Ops, Glue.getNode() ? 4 : 3));
   }
 
   SDValue getCopyFromReg(SDValue Chain, const SDLoc &dl, unsigned Reg, EVT VT) {
@@ -809,7 +806,7 @@ public:
     SDVTList VTs = getVTList(VT, MVT::Other, MVT::Glue);
     SDValue Ops[] = { Chain, getRegister(Reg, VT), Glue };
     return getNode(ISD::CopyFromReg, dl, VTs,
-                   makeArrayRef(Ops, Glue.getNode() ? 3 : 2));
+                   ArrayRef(Ops, Glue.getNode() ? 3 : 2));
   }
 
   SDValue getCondCode(ISD::CondCode Cond);
@@ -1063,7 +1060,7 @@ public:
 
   /// Return a node that represents the runtime scaling 'MulImm * RuntimeVL'.
   SDValue getVScale(const SDLoc &DL, EVT VT, APInt MulImm) {
-    assert(MulImm.getMinSignedBits() <= VT.getSizeInBits() &&
+    assert(MulImm.getSignificantBits() <= VT.getSizeInBits() &&
            "Immediate does not fit VT");
     return getNode(ISD::VSCALE, DL, VT,
                    getConstant(MulImm.sextOrTrunc(VT.getSizeInBits()), DL, VT));
@@ -1307,6 +1304,8 @@ public:
                   const AAMDNodes &AAInfo = AAMDNodes(),
                   const MDNode *Ranges = nullptr);
   /// FIXME: Remove once transition to Align is over.
+  LLVM_DEPRECATED("Use the getLoad function that takes a MaybeAlign instead",
+                  "")
   inline SDValue
   getLoad(EVT VT, const SDLoc &dl, SDValue Chain, SDValue Ptr,
           MachinePointerInfo PtrInfo, unsigned Alignment,
@@ -1324,16 +1323,6 @@ public:
              MaybeAlign Alignment = MaybeAlign(),
              MachineMemOperand::Flags MMOFlags = MachineMemOperand::MONone,
              const AAMDNodes &AAInfo = AAMDNodes());
-  /// FIXME: Remove once transition to Align is over.
-  inline SDValue
-  getExtLoad(ISD::LoadExtType ExtType, const SDLoc &dl, EVT VT, SDValue Chain,
-             SDValue Ptr, MachinePointerInfo PtrInfo, EVT MemVT,
-             unsigned Alignment,
-             MachineMemOperand::Flags MMOFlags = MachineMemOperand::MONone,
-             const AAMDNodes &AAInfo = AAMDNodes()) {
-    return getExtLoad(ExtType, dl, VT, Chain, Ptr, PtrInfo, MemVT,
-                      MaybeAlign(Alignment), MMOFlags, AAInfo);
-  }
   SDValue getExtLoad(ISD::LoadExtType ExtType, const SDLoc &dl, EVT VT,
                      SDValue Chain, SDValue Ptr, EVT MemVT,
                      MachineMemOperand *MMO);
@@ -1357,6 +1346,8 @@ public:
                    Ranges);
   }
   /// FIXME: Remove once transition to Align is over.
+  LLVM_DEPRECATED("Use the getLoad function that takes a MaybeAlign instead",
+                  "")
   inline SDValue
   getLoad(ISD::MemIndexedMode AM, ISD::LoadExtType ExtType, EVT VT,
           const SDLoc &dl, SDValue Chain, SDValue Ptr, SDValue Offset,
@@ -1391,6 +1382,7 @@ public:
                     MMOFlags, AAInfo);
   }
   /// FIXME: Remove once transition to Align is over.
+  LLVM_DEPRECATED("Use the version that takes a MaybeAlign instead", "")
   inline SDValue
   getStore(SDValue Chain, const SDLoc &dl, SDValue Val, SDValue Ptr,
            MachinePointerInfo PtrInfo, unsigned Alignment,
@@ -1417,6 +1409,7 @@ public:
                          AAInfo);
   }
   /// FIXME: Remove once transition to Align is over.
+  LLVM_DEPRECATED("Use the version that takes a MaybeAlign instead", "")
   inline SDValue
   getTruncStore(SDValue Chain, const SDLoc &dl, SDValue Val, SDValue Ptr,
                 MachinePointerInfo PtrInfo, EVT SVT, unsigned Alignment,
@@ -1900,16 +1893,6 @@ public:
   /// To be invoked on an SDNode that is slated to be erased. This
   /// function mirrors \c llvm::salvageDebugInfo.
   void salvageDebugInfo(SDNode &N);
-
-  /// Signal whether instruction referencing variable locations are desired for
-  /// this function's debug-info.
-  void useInstrRefDebugInfo(bool Flag) {
-    UseInstrRefDebugInfo = Flag;
-  }
-
-  bool getUseInstrRefDebugInfo() const {
-    return UseInstrRefDebugInfo;
-  }
 
   void dump() const;
 

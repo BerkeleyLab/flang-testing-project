@@ -25,7 +25,6 @@
 #include "llvm/Analysis/AssumeBundleQueries.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/ConstantFolding.h"
-#include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/GuardUtils.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/Loads.h"
@@ -42,6 +41,7 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/EHPersonalities.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/GlobalAlias.h"
@@ -479,7 +479,7 @@ void llvm::computeKnownBitsFromRangeMetadata(const MDNode &Ranges,
 
     // The first CommonPrefixBits of all values in Range are equal.
     unsigned CommonPrefixBits =
-        (Range.getUnsignedMax() ^ Range.getUnsignedMin()).countLeadingZeros();
+        (Range.getUnsignedMax() ^ Range.getUnsignedMin()).countl_zero();
     APInt Mask = APInt::getHighBitsSet(BitWidth, CommonPrefixBits);
     APInt UnsignedMax = Range.getUnsignedMax().zextOrTrunc(BitWidth);
     Known.One &= UnsignedMax & Mask;
@@ -940,6 +940,14 @@ static void computeKnownBitsFromAssume(const Value *V, KnownBits &Known,
           Known.Zero.setHighBits(RHSKnown.countMinLeadingZeros());
       }
       break;
+    case ICmpInst::ICMP_NE: {
+      // assume (v & b != 0) where b is a power of 2
+      const APInt *BPow2;
+      if (match(Cmp, m_ICmp(Pred, m_c_And(m_V, m_Power2(BPow2)), m_Zero())) &&
+          isValidAssumeForContext(I, Q.CxtI, Q.DT)) {
+        Known.One |= BPow2->zextOrTrunc(BitWidth);
+      }
+    } break;
     }
   }
 
@@ -1056,6 +1064,93 @@ static void computeKnownBitsFromShiftOperator(
     Known.setAllZero();
 }
 
+static KnownBits getKnownBitsFromAndXorOr(const Operator *I,
+                                          const APInt &DemandedElts,
+                                          const KnownBits &KnownLHS,
+                                          const KnownBits &KnownRHS,
+                                          unsigned Depth, const Query &Q) {
+  unsigned BitWidth = KnownLHS.getBitWidth();
+  KnownBits KnownOut(BitWidth);
+  bool IsAnd = false;
+  bool HasKnownOne = !KnownLHS.One.isZero() || !KnownRHS.One.isZero();
+  Value *X = nullptr, *Y = nullptr;
+
+  switch (I->getOpcode()) {
+  case Instruction::And:
+    KnownOut = KnownLHS & KnownRHS;
+    IsAnd = true;
+    // and(x, -x) is common idioms that will clear all but lowest set
+    // bit. If we have a single known bit in x, we can clear all bits
+    // above it.
+    // TODO: instcombine often reassociates independent `and` which can hide
+    // this pattern. Try to match and(x, and(-x, y)) / and(and(x, y), -x).
+    if (HasKnownOne && match(I, m_c_And(m_Value(X), m_Neg(m_Deferred(X))))) {
+      // -(-x) == x so using whichever (LHS/RHS) gets us a better result.
+      if (KnownLHS.countMaxTrailingZeros() <= KnownRHS.countMaxTrailingZeros())
+        KnownOut = KnownLHS.blsi();
+      else
+        KnownOut = KnownRHS.blsi();
+    }
+    break;
+  case Instruction::Or:
+    KnownOut = KnownLHS | KnownRHS;
+    break;
+  case Instruction::Xor:
+    KnownOut = KnownLHS ^ KnownRHS;
+    // xor(x, x-1) is common idioms that will clear all but lowest set
+    // bit. If we have a single known bit in x, we can clear all bits
+    // above it.
+    // TODO: xor(x, x-1) is often rewritting as xor(x, x-C) where C !=
+    // -1 but for the purpose of demanded bits (xor(x, x-C) &
+    // Demanded) == (xor(x, x-1) & Demanded). Extend the xor pattern
+    // to use arbitrary C if xor(x, x-C) as the same as xor(x, x-1).
+    if (HasKnownOne &&
+        match(I, m_c_Xor(m_Value(X), m_c_Add(m_Deferred(X), m_AllOnes())))) {
+      const KnownBits &XBits = I->getOperand(0) == X ? KnownLHS : KnownRHS;
+      KnownOut = XBits.blsmsk();
+    }
+    break;
+  default:
+    llvm_unreachable("Invalid Op used in 'analyzeKnownBitsFromAndXorOr'");
+  }
+
+  // and(x, add (x, -1)) is a common idiom that always clears the low bit;
+  // xor/or(x, add (x, -1)) is an idiom that will always set the low bit.
+  // here we handle the more general case of adding any odd number by
+  // matching the form and/xor/or(x, add(x, y)) where y is odd.
+  // TODO: This could be generalized to clearing any bit set in y where the
+  // following bit is known to be unset in y.
+  if (!KnownOut.Zero[0] && !KnownOut.One[0] &&
+      (match(I, m_c_BinOp(m_Value(X), m_c_Add(m_Deferred(X), m_Value(Y)))) ||
+       match(I, m_c_BinOp(m_Value(X), m_Sub(m_Deferred(X), m_Value(Y)))) ||
+       match(I, m_c_BinOp(m_Value(X), m_Sub(m_Value(Y), m_Deferred(X)))))) {
+    KnownBits KnownY(BitWidth);
+    computeKnownBits(Y, DemandedElts, KnownY, Depth + 1, Q);
+    if (KnownY.countMinTrailingOnes() > 0) {
+      if (IsAnd)
+        KnownOut.Zero.setBit(0);
+      else
+        KnownOut.One.setBit(0);
+    }
+  }
+  return KnownOut;
+}
+
+// Public so this can be used in `SimplifyDemandedUseBits`.
+KnownBits llvm::analyzeKnownBitsFromAndXorOr(
+    const Operator *I, const KnownBits &KnownLHS, const KnownBits &KnownRHS,
+    unsigned Depth, const DataLayout &DL, AssumptionCache *AC,
+    const Instruction *CxtI, const DominatorTree *DT,
+    OptimizationRemarkEmitter *ORE, bool UseInstrInfo) {
+  auto *FVTy = dyn_cast<FixedVectorType>(I->getType());
+  APInt DemandedElts =
+      FVTy ? APInt::getAllOnes(FVTy->getNumElements()) : APInt(1, 1);
+
+  return getKnownBitsFromAndXorOr(
+      I, DemandedElts, KnownLHS, KnownRHS, Depth,
+      Query(DL, AC, safeCxtI(I, CxtI), DT, UseInstrInfo, ORE));
+}
+
 static void computeKnownBitsFromOperator(const Operator *I,
                                          const APInt &DemandedElts,
                                          KnownBits &Known, unsigned Depth,
@@ -1070,39 +1165,23 @@ static void computeKnownBitsFromOperator(const Operator *I,
             Q.IIQ.getMetadata(cast<LoadInst>(I), LLVMContext::MD_range))
       computeKnownBitsFromRangeMetadata(*MD, Known);
     break;
-  case Instruction::And: {
-    // If either the LHS or the RHS are Zero, the result is zero.
+  case Instruction::And:
     computeKnownBits(I->getOperand(1), DemandedElts, Known, Depth + 1, Q);
     computeKnownBits(I->getOperand(0), DemandedElts, Known2, Depth + 1, Q);
 
-    Known &= Known2;
-
-    // and(x, add (x, -1)) is a common idiom that always clears the low bit;
-    // here we handle the more general case of adding any odd number by
-    // matching the form add(x, add(x, y)) where y is odd.
-    // TODO: This could be generalized to clearing any bit set in y where the
-    // following bit is known to be unset in y.
-    Value *X = nullptr, *Y = nullptr;
-    if (!Known.Zero[0] && !Known.One[0] &&
-        match(I, m_c_BinOp(m_Value(X), m_Add(m_Deferred(X), m_Value(Y))))) {
-      Known2.resetAll();
-      computeKnownBits(Y, DemandedElts, Known2, Depth + 1, Q);
-      if (Known2.countMinTrailingOnes() > 0)
-        Known.Zero.setBit(0);
-    }
+    Known = getKnownBitsFromAndXorOr(I, DemandedElts, Known2, Known, Depth, Q);
     break;
-  }
   case Instruction::Or:
     computeKnownBits(I->getOperand(1), DemandedElts, Known, Depth + 1, Q);
     computeKnownBits(I->getOperand(0), DemandedElts, Known2, Depth + 1, Q);
 
-    Known |= Known2;
+    Known = getKnownBitsFromAndXorOr(I, DemandedElts, Known2, Known, Depth, Q);
     break;
   case Instruction::Xor:
     computeKnownBits(I->getOperand(1), DemandedElts, Known, Depth + 1, Q);
     computeKnownBits(I->getOperand(0), DemandedElts, Known2, Depth + 1, Q);
 
-    Known ^= Known2;
+    Known = getKnownBitsFromAndXorOr(I, DemandedElts, Known2, Known, Depth, Q);
     break;
   case Instruction::Mul: {
     bool NSW = Q.IIQ.hasNoSignedWrap(cast<OverflowingBinaryOperator>(I));
@@ -1270,7 +1349,7 @@ static void computeKnownBitsFromOperator(const Operator *I,
     // Trailing zeros of a right-shifted constant never decrease.
     const APInt *C;
     if (match(I->getOperand(0), m_APInt(C)))
-      Known.Zero.setLowBits(C->countTrailingZeros());
+      Known.Zero.setLowBits(C->countr_zero());
     break;
   }
   case Instruction::LShr: {
@@ -1282,7 +1361,7 @@ static void computeKnownBitsFromOperator(const Operator *I,
     // Leading zeros of a left-shifted constant never decrease.
     const APInt *C;
     if (match(I->getOperand(0), m_APInt(C)))
-      Known.Zero.setHighBits(C->countLeadingZeros());
+      Known.Zero.setHighBits(C->countl_zero());
     break;
   }
   case Instruction::AShr: {
@@ -1367,14 +1446,14 @@ static void computeKnownBitsFromOperator(const Operator *I,
       KnownBits IndexBits(IndexBitWidth);
       computeKnownBits(Index, IndexBits, Depth + 1, Q);
       TypeSize IndexTypeSize = Q.DL.getTypeAllocSize(IndexedTy);
-      uint64_t TypeSizeInBytes = IndexTypeSize.getKnownMinSize();
+      uint64_t TypeSizeInBytes = IndexTypeSize.getKnownMinValue();
       KnownBits ScalingFactor(IndexBitWidth);
       // Multiply by current sizeof type.
       // &A[i] == A + i * sizeof(*A[i]).
       if (IndexTypeSize.isScalable()) {
         // For scalable types the only thing we know about sizeof is
         // that this is a multiple of the minimum size.
-        ScalingFactor.Zero.setLowBits(countTrailingZeros(TypeSizeInBytes));
+        ScalingFactor.Zero.setLowBits(llvm::countr_zero(TypeSizeInBytes));
       } else if (IndexBits.isConstant()) {
         APInt IndexConst = IndexBits.getConstant();
         APInt ScalingFactor(IndexBitWidth, TypeSizeInBytes);
@@ -1570,10 +1649,10 @@ static void computeKnownBitsFromOperator(const Operator *I,
                 Known2 = KnownBits::makeConstant(*RHSC);
                 break;
               case CmpInst::Predicate::ICMP_ULE:
-                Known2.Zero.setHighBits(RHSC->countLeadingZeros());
+                Known2.Zero.setHighBits(RHSC->countl_zero());
                 break;
               case CmpInst::Predicate::ICMP_ULT:
-                Known2.Zero.setHighBits((*RHSC - 1).countLeadingZeros());
+                Known2.Zero.setHighBits((*RHSC - 1).countl_zero());
                 break;
               default:
                 // TODO - add additional integer predicate handling.
@@ -1631,7 +1710,7 @@ static void computeKnownBitsFromOperator(const Operator *I,
         // If this call is poison for 0 input, the result will be less than 2^n.
         if (II->getArgOperand(1) == ConstantInt::getTrue(II->getContext()))
           PossibleLZ = std::min(PossibleLZ, BitWidth - 1);
-        unsigned LowBits = Log2_32(PossibleLZ)+1;
+        unsigned LowBits = llvm::bit_width(PossibleLZ);
         Known.Zero.setBitsFrom(LowBits);
         break;
       }
@@ -1642,7 +1721,7 @@ static void computeKnownBitsFromOperator(const Operator *I,
         // If this call is poison for 0 input, the result will be less than 2^n.
         if (II->getArgOperand(1) == ConstantInt::getTrue(II->getContext()))
           PossibleTZ = std::min(PossibleTZ, BitWidth - 1);
-        unsigned LowBits = Log2_32(PossibleTZ)+1;
+        unsigned LowBits = llvm::bit_width(PossibleTZ);
         Known.Zero.setBitsFrom(LowBits);
         break;
       }
@@ -1651,7 +1730,7 @@ static void computeKnownBitsFromOperator(const Operator *I,
         // We can bound the space the count needs.  Also, bits known to be zero
         // can't contribute to the population.
         unsigned BitsPossiblySet = Known2.countMaxPopulation();
-        unsigned LowBits = Log2_32(BitsPossiblySet)+1;
+        unsigned LowBits = llvm::bit_width(BitsPossiblySet);
         Known.Zero.setBitsFrom(LowBits);
         // TODO: we could bound KnownOne using the lower bound on the number
         // of bits which might be set provided by popcnt KnownOne2.
@@ -1734,10 +1813,10 @@ static void computeKnownBitsFromOperator(const Operator *I,
         break;
       case Intrinsic::riscv_vsetvli:
       case Intrinsic::riscv_vsetvlimax:
-        // Assume that VL output is positive and would fit in an int32_t.
-        // TODO: VLEN might be capped at 16 bits in a future V spec update.
-        if (BitWidth >= 32)
-          Known.Zero.setBitsFrom(31);
+        // Assume that VL output is >= 65536.
+        // TODO: Take SEW and LMUL into account.
+        if (BitWidth > 17)
+          Known.Zero.setBitsFrom(17);
         break;
       case Intrinsic::vscale: {
         if (!II->getParent() || !II->getFunction() ||
@@ -1761,7 +1840,7 @@ static void computeKnownBitsFromOperator(const Operator *I,
           break;
         }
 
-        unsigned FirstZeroHighBit = 32 - countLeadingZeros(*VScaleMax);
+        unsigned FirstZeroHighBit = llvm::bit_width(*VScaleMax);
         if (FirstZeroHighBit < BitWidth)
           Known.Zero.setBitsFrom(FirstZeroHighBit);
 
@@ -2300,8 +2379,7 @@ static bool isGEPKnownNonNull(const GEPOperator *GEP, unsigned Depth,
 static bool isKnownNonNullFromDominatingCondition(const Value *V,
                                                   const Instruction *CtxI,
                                                   const DominatorTree *DT) {
-  if (isa<Constant>(V))
-    return false;
+  assert(!isa<Constant>(V) && "Called for constant?");
 
   if (!CtxI || !DT)
     return false;
@@ -2565,17 +2643,23 @@ bool isKnownNonZero(const Value *V, const APInt &DemandedElts, unsigned Depth,
     // truncating casts, e.g., int2ptr/ptr2int with appropriate sizes, as well
     // as casts that can alter the value, e.g., AddrSpaceCasts.
     if (!isa<ScalableVectorType>(I->getType()) &&
-        Q.DL.getTypeSizeInBits(I->getOperand(0)->getType()).getFixedSize() <=
-        Q.DL.getTypeSizeInBits(I->getType()).getFixedSize())
+        Q.DL.getTypeSizeInBits(I->getOperand(0)->getType()).getFixedValue() <=
+            Q.DL.getTypeSizeInBits(I->getType()).getFixedValue())
       return isKnownNonZero(I->getOperand(0), Depth, Q);
     break;
   case Instruction::PtrToInt:
     // Similar to int2ptr above, we can look through ptr2int here if the cast
     // is a no-op or an extend and not a truncate.
     if (!isa<ScalableVectorType>(I->getType()) &&
-        Q.DL.getTypeSizeInBits(I->getOperand(0)->getType()).getFixedSize() <=
-        Q.DL.getTypeSizeInBits(I->getType()).getFixedSize())
+        Q.DL.getTypeSizeInBits(I->getOperand(0)->getType()).getFixedValue() <=
+            Q.DL.getTypeSizeInBits(I->getType()).getFixedValue())
       return isKnownNonZero(I->getOperand(0), Depth, Q);
+    break;
+  case Instruction::Sub:
+    if (auto *C = dyn_cast<Constant>(I->getOperand(0)))
+      if (C->isNullValue() &&
+          isKnownNonZero(I->getOperand(1), DemandedElts, Depth, Q))
+        return true;
     break;
   case Instruction::Or:
     // X | Y != 0 if X != 0 or Y != 0.
@@ -2721,8 +2805,26 @@ bool isKnownNonZero(const Value *V, const APInt &DemandedElts, unsigned Depth,
            isGuaranteedNotToBePoison(I->getOperand(0), Q.AC, Q.CxtI, Q.DT,
                                      Depth);
   case Instruction::Call:
-    if (cast<CallInst>(I)->getIntrinsicID() == Intrinsic::vscale)
-      return true;
+    if (auto *II = dyn_cast<IntrinsicInst>(I)) {
+      switch (II->getIntrinsicID()) {
+      case Intrinsic::abs:
+      case Intrinsic::bitreverse:
+      case Intrinsic::bswap:
+      case Intrinsic::ctpop:
+        if (isKnownNonZero(II->getArgOperand(0), DemandedElts, Depth, Q))
+          return true;
+        break;
+      case Intrinsic::uadd_sat:
+        if (isKnownNonZero(II->getArgOperand(0), DemandedElts, Depth, Q) ||
+            isKnownNonZero(II->getArgOperand(1), DemandedElts, Depth, Q))
+          return true;
+        break;
+      case Intrinsic::vscale:
+        return true;
+      default:
+        break;
+      }
+    }
     break;
   }
 
@@ -3660,6 +3762,14 @@ static bool cannotBeOrderedLessThanZeroImpl(const Value *V,
       break;
     case Intrinsic::canonicalize:
     case Intrinsic::arithmetic_fence:
+    case Intrinsic::floor:
+    case Intrinsic::ceil:
+    case Intrinsic::trunc:
+    case Intrinsic::rint:
+    case Intrinsic::nearbyint:
+    case Intrinsic::round:
+    case Intrinsic::roundeven:
+    case Intrinsic::fptrunc_round:
       return cannotBeOrderedLessThanZeroImpl(I->getOperand(0), TLI, SignBitOnly, Depth + 1);
     case Intrinsic::maxnum: {
       Value *V0 = I->getOperand(0), *V1 = I->getOperand(1);
@@ -3762,6 +3872,18 @@ bool llvm::isKnownNeverInfinity(const Value *V, const TargetLibraryInfo *TLI,
   if (auto *FPMathOp = dyn_cast<FPMathOperator>(V))
     if (FPMathOp->hasNoInfs())
       return true;
+
+  if (const auto *Arg = dyn_cast<Argument>(V)) {
+    if ((Arg->getNoFPClass() & fcInf) == fcInf)
+      return true;
+  }
+
+  // TODO: Use fpclass like API for isKnown queries and distinguish +inf from
+  // -inf.
+  if (const auto *CB = dyn_cast<CallBase>(V)) {
+    if ((CB->getRetNoFPClass() & fcInf) == fcInf)
+      return true;
+  }
 
   // Handle scalar constants.
   if (auto *CFP = dyn_cast<ConstantFP>(V))
@@ -3890,6 +4012,19 @@ bool llvm::isKnownNeverNaN(const Value *V, const TargetLibraryInfo *TLI,
   if (auto *FPMathOp = dyn_cast<FPMathOperator>(V))
     if (FPMathOp->hasNoNaNs())
       return true;
+
+  if (const auto *Arg = dyn_cast<Argument>(V)) {
+    if ((Arg->getNoFPClass() & fcNan) == fcNan)
+      return true;
+  }
+
+  // TODO: Use fpclass like API for isKnown queries and distinguish snan from
+  // qnan.
+  if (const auto *CB = dyn_cast<CallBase>(V)) {
+    FPClassTest Mask = CB->getRetNoFPClass();
+    if ((Mask & fcNan) == fcNan)
+      return true;
+  }
 
   // Handle scalar constants.
   if (auto *CFP = dyn_cast<ConstantFP>(V))
@@ -4139,8 +4274,8 @@ static Value *BuildSubAggregate(Value *From, Value* To, Type *IndexedType,
     return nullptr;
 
   // Insert the value in the new (sub) aggregate
-  return InsertValueInst::Create(To, V, makeArrayRef(Idxs).slice(IdxSkip),
-                                 "tmp", InsertBefore);
+  return InsertValueInst::Create(To, V, ArrayRef(Idxs).slice(IdxSkip), "tmp",
+                                 InsertBefore);
 }
 
 // This helper takes a nested struct and extracts a part of it (which is again a
@@ -4212,7 +4347,7 @@ Value *llvm::FindInsertedValue(Value *V, ArrayRef<unsigned> idx_range,
         // %C = insertvalue {i32, i32 } %A, i32 11, 1
         // which allows the unused 0,0 element from the nested struct to be
         // removed.
-        return BuildSubAggregate(V, makeArrayRef(idx_range.begin(), req_idx),
+        return BuildSubAggregate(V, ArrayRef(idx_range.begin(), req_idx),
                                  InsertBefore);
       }
 
@@ -4227,8 +4362,7 @@ Value *llvm::FindInsertedValue(Value *V, ArrayRef<unsigned> idx_range,
     // requested (though possibly only partially). Now we recursively look at
     // the inserted value, passing any remaining indices.
     return FindInsertedValue(I->getInsertedValueOperand(),
-                             makeArrayRef(req_idx, idx_range.end()),
-                             InsertBefore);
+                             ArrayRef(req_idx, idx_range.end()), InsertBefore);
   }
 
   if (ExtractValueInst *I = dyn_cast<ExtractValueInst>(V)) {
@@ -4324,7 +4458,7 @@ bool llvm::getConstantDataArrayInfo(const Value *V,
 
   if (GV->getInitializer()->isNullValue()) {
     Type *GVTy = GV->getValueType();
-    uint64_t SizeInBytes = DL.getTypeStoreSize(GVTy).getFixedSize();
+    uint64_t SizeInBytes = DL.getTypeStoreSize(GVTy).getFixedValue();
     uint64_t Length = SizeInBytes / ElementSizeInBytes;
 
     Slice.Array = nullptr;
@@ -5221,9 +5355,9 @@ static bool shiftAmountKnownInRange(const Value *ShiftAmount) {
 }
 
 static bool canCreateUndefOrPoison(const Operator *Op, bool PoisonOnly,
-                                   bool ConsiderFlags) {
+                                   bool ConsiderFlagsAndMetadata) {
 
-  if (ConsiderFlags && Op->hasPoisonGeneratingFlags())
+  if (ConsiderFlagsAndMetadata && Op->hasPoisonGeneratingFlagsOrMetadata())
     return true;
 
   unsigned Opcode = Op->getOpcode();
@@ -5371,12 +5505,15 @@ static bool canCreateUndefOrPoison(const Operator *Op, bool PoisonOnly,
   }
 }
 
-bool llvm::canCreateUndefOrPoison(const Operator *Op, bool ConsiderFlags) {
-  return ::canCreateUndefOrPoison(Op, /*PoisonOnly=*/false, ConsiderFlags);
+bool llvm::canCreateUndefOrPoison(const Operator *Op,
+                                  bool ConsiderFlagsAndMetadata) {
+  return ::canCreateUndefOrPoison(Op, /*PoisonOnly=*/false,
+                                  ConsiderFlagsAndMetadata);
 }
 
-bool llvm::canCreatePoison(const Operator *Op, bool ConsiderFlags) {
-  return ::canCreateUndefOrPoison(Op, /*PoisonOnly=*/true, ConsiderFlags);
+bool llvm::canCreatePoison(const Operator *Op, bool ConsiderFlagsAndMetadata) {
+  return ::canCreateUndefOrPoison(Op, /*PoisonOnly=*/true,
+                                  ConsiderFlagsAndMetadata);
 }
 
 static bool directlyImpliesPoison(const Value *ValAssumedPoison,
@@ -7107,7 +7244,7 @@ static void setLimitsForBinOp(const BinaryOperator &BO, APInt &Lower,
     } else if (match(BO.getOperand(0), m_APInt(C))) {
       unsigned ShiftAmount = Width - 1;
       if (!C->isZero() && IIQ.isExact(&BO))
-        ShiftAmount = C->countTrailingZeros();
+        ShiftAmount = C->countr_zero();
       if (C->isNegative()) {
         // 'ashr C, x' produces [C, C >> (Width-1)]
         Lower = *C;
@@ -7128,7 +7265,7 @@ static void setLimitsForBinOp(const BinaryOperator &BO, APInt &Lower,
       // 'lshr C, x' produces [C >> (Width-1), C].
       unsigned ShiftAmount = Width - 1;
       if (!C->isZero() && IIQ.isExact(&BO))
-        ShiftAmount = C->countTrailingZeros();
+        ShiftAmount = C->countr_zero();
       Lower = C->lshr(ShiftAmount);
       Upper = *C + 1;
     }
@@ -7139,16 +7276,16 @@ static void setLimitsForBinOp(const BinaryOperator &BO, APInt &Lower,
       if (IIQ.hasNoUnsignedWrap(&BO)) {
         // 'shl nuw C, x' produces [C, C << CLZ(C)]
         Lower = *C;
-        Upper = Lower.shl(Lower.countLeadingZeros()) + 1;
+        Upper = Lower.shl(Lower.countl_zero()) + 1;
       } else if (BO.hasNoSignedWrap()) { // TODO: What if both nuw+nsw?
         if (C->isNegative()) {
           // 'shl nsw C, x' produces [C << CLO(C)-1, C]
-          unsigned ShiftAmount = C->countLeadingOnes() - 1;
+          unsigned ShiftAmount = C->countl_one() - 1;
           Lower = C->shl(ShiftAmount);
           Upper = *C + 1;
         } else {
           // 'shl nsw C, x' produces [C, C << CLZ(C)-1]
-          unsigned ShiftAmount = C->countLeadingZeros() - 1;
+          unsigned ShiftAmount = C->countl_zero() - 1;
           Lower = *C;
           Upper = C->shl(ShiftAmount) + 1;
         }
@@ -7165,7 +7302,7 @@ static void setLimitsForBinOp(const BinaryOperator &BO, APInt &Lower,
         //    where C != -1 and C != 0 and C != 1
         Lower = IntMin + 1;
         Upper = IntMax + 1;
-      } else if (C->countLeadingZeros() < Width - 1) {
+      } else if (C->countl_zero() < Width - 1) {
         // 'sdiv x, C' produces [INT_MIN / C, INT_MAX / C]
         //    where C != -1 and C != 0 and C != 1
         Lower = IntMin.sdiv(*C);
@@ -7480,7 +7617,7 @@ getOffsetFromIndex(const GEPOperator *GEP, unsigned Idx, const DataLayout &DL) {
     TypeSize Size = DL.getTypeAllocSize(GTI.getIndexedType());
     if (Size.isScalable())
       return std::nullopt;
-    Offset += Size.getFixedSize() * OpC->getSExtValue();
+    Offset += Size.getFixedValue() * OpC->getSExtValue();
   }
 
   return Offset;
