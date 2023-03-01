@@ -26,7 +26,7 @@
   `atomic_fetch_add`, `atomic_fetch_and`, `atomic_fetch_or`, `atomic_fetch_xor`, `atomic_or`, `atomic_ref`, `atomic_xor`
     - _Other subroutines:_ `event_query`
   * **Types, kind type parameters, and values:**
-    - _Intrinsic derived types:_ `event_type`, `team_type`
+    - _Intrinsic derived types:_ `event_type`, `team_type`, `lock_type`
     - _Atomic kind type parameters:_ `atomic_int_kind` and `atomic_logical_kind`
     - _Values:_ `stat_failed_image`, `stat_locked`, `stat_locked_other_image`, `stat_stopped_image`, `stat_unlocked`, `stat_unlocked_failed_image`
 
@@ -34,20 +34,15 @@ In addition to being able to support syntax related to the above features, compi
  * **Image control statements:**
    - _Pre-existing statements_: `allocate`, `deallocate`, `stop`, `end`, a `call` referencing `move_alloc` with coarray arguments
    - _New statements:_ `sync all`, `sync images`, `sync memory`, `sync team`, `change team`, `end team`, `critical`, `end critical`, `event post`, `event wait`, `form team`, `lock`, `unlock`
-One consequence of the statements being categorizing statements as image control will be the need to restrict code movement by optimizing compilers.
+One consequence of the statements being categorized as image control statements will be the need to restrict code movement by optimizing compilers.
 
 # Proposed solution
-  This design document proposes an application programming interface (API) to support the above features.  Implementations of some parts of the API exist in [Caffeine], a parallel runtime library targeting coarray Fortran compilers.  By defining a library-agnostic API, we envision facilitating the development of alternative parallel runtime libraries that support the same API.  One benefit of this approach is the ability to vary the communication substrate.  For example, Caffeine uses the [GASNet-EX] exascale networking middleware, whereas it might also be possible to develop wrappers that would support the proposed API with [OpenCoarrays], which uses the Message Passing Interface ([MPI]). A central aim of this document is to use a parallel runtime API in standard Fortran syntax, which enables us to leverage the Fortran to succinctly express various properties of the procedure interfaces, including argument attributes.  See [Rouson and Bonachea (2022)] for additional details.
+  This design document proposes an interface to support the above features, named Fortran Parallel Runtime Interface.  Implementations of some parts of the interface exist in [Caffeine], a parallel runtime library targeting coarray Fortran compilers.  By defining a library-agnostic interface, we envision facilitating the development of alternative parallel runtime libraries that support the same interface.  One benefit of this approach is the ability to vary the communication substrate.  For example, Caffeine uses the [GASNet-EX] exascale networking middleware, whereas it might also be possible to develop wrappers that would support the proposed interface with [OpenCoarrays], which uses the Message Passing Interface ([MPI]). A central aim of this document is to use a parallel runtime interface in standard Fortran syntax, which enables us to leverage the Fortran to succinctly express various properties of the procedure interfaces, including argument attributes.  See [Rouson and Bonachea (2022)] for additional details.
 
-# Implementation details overview
-  This design document proposes the design of Flang features and discusses how Flang will interface with Caffeine, the
-  runtime library. It outlines which tasks will be the responsibility of Flang and which tasks will be the responsibility
-  of Caffeine.
+# Interface overview
+  This document proposes a design for the Fortran Parallel Runtime Interface. It outlines which tasks will be the responsibility of the Fortran compiler and which tasks will be the responsibility of the runtime library. For the rest of the document, we will refer to the design in terms of Flang and Caffeine.
 
-## Coarray Runtime Library Caffeine
-  Caffeine is a parallel runtime library that aims to support Fortran compilers with a programming-model-agnostic application
-  binary interface (ABI) to various communication libraries. Current work is on supporting the ABI with the GASNet-EX
-  exascale-ready networking middleware.
+## Fortran Parallel Runtime Interface
 
 ## Delegation of tasks between Flang and Caffeine
 
@@ -68,12 +63,69 @@ One consequence of the statements being categorizing statements as image control
 | `end-team-stmt`                         |           |     ✓     |
 | Allocate a coarray                      |           |     ✓     |
 | Deallocate a coarray                    |           |     ✓     |
-| Reference a coindexed-object           |           |     ✓     |
+| Reference a coindexed-object            |           |     ✓     |
 
 
 Add to table: teams, events, synchronization statements, critical construct, locks
 
-## Compiler facing Caffeine API
+## Compiler facing Caffeine interface
+
+### Types
+(TODO: add hyperlinks to the discussion of each type description)
+
+ Provided Fortran types
+   * `caf_event_type`
+   * `caf_team_type`
+   * `caf_lock_type`
+
+ Caffeine specific types
+   * `caf_co_handle`
+   * `caf_async_handle`
+   * `caf_source_loc`   (NOTE: REMOVE: something like this is needed for critical constructs) (Does compiler control implementation of the type, or just provide the information and Caffeine controls the implementation?) OR deal with critical constructs by rewriting critical constructs as blocks with lock and unlocks (BURDENSOME because lock_type has to be coarray, this is the rationale for not rewriting, if we need it)
+
+### Common arguments
+
+   `coarray`, `coindices`, `target`, `value`, `team`, `team_number`, `stat`
+
+### Procedures (just names)
+
+(TODO: add hyperlinks to the discussion of each procedure description)
+
+   Collectives
+     `caf_co_broadcast`, `caf_co_max`, `caf_co_min`, `caf_co_reduce`, `caf_co-sum`
+
+   Program startup and shutdown
+     `caf_init`, `caf_error_stop`, `caf_stop`, `caf_fail_image`, etc. (TODO, fill in)
+
+   Allocation and deallocation
+     `caf_allocate`, `caf_deallocate`
+
+   Coarray Access
+      `caf_put`, `caf_get_blocking`, `caf_get_async`
+
+   Operation Synchronization
+      `caf_async_wait_for`, `caf_async_try_for`, `caf_sync_memory`
+
+   Image Synchronization
+      `caf_sync_all`, `caf_sync_images`, `caf_lock`, `caf_unlock`, `caf_critical`
+
+   Events
+      `caf_event_post`, `caf_event_wait`, `caf_event_query`
+
+   Teams
+     `caf_change_team`, `caf_end_team`, `caf_form_team`, `caf_sync_team`, `caf_get_team`, `caf_team_number`
+
+   Atomic Memory Operation
+      `caf_atomic_add`, `caf_atomic_and`, `caf_atomic_cas`, `caf_atomic_define`, `caf_atomic_fetch_add`, `caf_atomic_fetch_and`, `caf_atomic_fetch_or`, `caf_atomic_fetch_xor`, `caf_atomic_or`, `caf_atomic_ref`, `caf_atomic_xor`
+
+   Coarray Queries
+     `caf_lcobound`, `caf_ucobound`, `caf_coshape`, `caf_image_index`
+
+   Image Queries
+     `caf_num_images`, `caf_this_image`, `caf_failed_images`, `caf_stopped_images`,`caf_image_status`
+
+
+### Procedure descriptions
 
 
 ### Allocation and deallocation
@@ -154,7 +206,7 @@ split phased gets
     integer, optional, intent(out) :: stat
   end subroutine
 
-  module subroutine caf_get_non_blocking(coarray, coindices, team, team_number, source, value, stat, async_handle)
+  module subroutine caf_get_async(coarray, coindices, team, team_number, source, value, stat, async_handle)
     implicit none
     type(caf_co_handle), intent(in) :: coarray
     integer, intent(in) :: coindices(:)
@@ -181,6 +233,12 @@ split phased gets
   end subroutine
 
 ```
+
+  * **caf_put:**
+    -   Description:
+    -   Procedure Interface: `subroutine caf_put(coarray, coindices, team, team_number, target, value, stat)`
+
+
   * **caf_get_blocking:**
     -   Description: ...
     -   Procedure Interface: `subroutine caf_get_blocking(coarray, coindices, team, team_number, source, value, stat)`
@@ -201,8 +259,8 @@ split phased gets
     -   Could be handle based or fence based approaches
     -   Handle based - return can individual operation handle, later on compiler synchronizes handle
     -   Fence based - implicit handle operations, closer to MPI
-
-### Atomic subroutines
+#
+## Atomic subroutines
 
   * **caf_atomic_define:**
     -   Description: ...
@@ -261,6 +319,7 @@ TODOs:
     need to be able to track puts in flight, may need a write buffer, record boundaries in a hash table struct
     every single rma needs to check the table to see if there is a conflicting overlap
     could add caching
+    if the constants (stat_failed_image, etc) are compiler provided, we need to get C access to these values
 
 flexible array member in c
 
