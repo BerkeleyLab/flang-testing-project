@@ -5,6 +5,8 @@
    SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 -->
+# THIS IS A WORK IN PROGRESS - DECISIONS REGARDING THE DESIGNS DISCUSSED IN THIS DOCUMENT ARE ONGOING AND MAY CHANGE
+
 
 # Problem description
   In order to be fully Fortran 2018 compliant, Flang needs to add support for what is commonly referred to as coarray fortran, which includes features related to parallelism. These features include the following statements, subroutines, functions, types, and kind type parameters:
@@ -45,17 +47,10 @@ One consequence of the statements being categorized as image control statements 
 ## Fortran Parallel Runtime Interface
 
 ## Types
-(TODO: add hyperlinks to the discussion of each type description)
 
- Provided Fortran types
-   * `caf_event_type`
-   * `caf_team_type`
-   * `caf_lock_type`
+ **Provided Fortran types:** [`caf_event_type`](#caf_event_type), [`caf_team_type`](#caf_team_type), [`caf_lock_type`](#caf_lock_type)
 
- Caffeine specific types
-   * `caf_co_handle_t` : `caf_co_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler.
-   * `caf_async_handle_t`
-   * `caf_source_loc`   (REMOVE_NOTE: something like this is needed for critical constructs) (Does compiler control implementation of the type, or just provide the information and Caffeine controls the implementation?) OR deal with critical constructs by rewriting critical constructs as blocks with lock and unlocks (BURDENSOME because lock_type has to be coarray, this is the rationale for not rewriting, if we need it)
+ **Caffeine specific types:** [`caf_co_handle_t`](#caf_co_handle_t), [`caf_async_handle_t`](#caf_async_handle_t), [`caf_source_loc_t`](#caf_source_loc_t)
 
 ## Common arguments
 
@@ -63,59 +58,97 @@ One consequence of the statements being categorized as image control statements 
 
 ## Procedures
 
-   Collectives
+   **Collectives:**
      [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum)
 
-   Program startup and shutdown
+   **Program startup and shutdown:**
      [`caf_init`](#caf_init), [`caf_finalize`](#caf_finalize), [`caf_error_stop`](#caf_error_stop), [`caf_stop`](#caf_stop), [`caf_fail_image`](#caf_fail_image)
 
-   Allocation and deallocation
+   **Allocation and deallocation:**
      [`caf_allocate`](#caf_allocate), [`caf_deallocate`](#caf_deallocate)
 
-   Coarray Access
+   **Coarray Access:**
      [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async)
 
-   Operation Synchronization
+   **Operation Synchronization:**
      [`caf_async_wait_for`](#caf_aync_wait_for), [`caf_async_try_for`](#caf_async_try_for), [`caf_sync_memory`](#caf_sync_memory)
 
-   Image Synchronization
+   **Image Synchronization:**
      [`caf_sync_all`](#caf_sync_all), [`caf_sync_images`](#caf_sync_images), [`caf_lock`](#caf_lock), [`caf_unlock`](#caf_unlock), [`caf_critical`](#caf_critical)
 
-   Events
+   **Events:**
      [`caf_event_post`](#caf_event_post), [`caf_event_wait`](#caf_event_wait), [`caf_event_query`](#caf_event_query)
 
-   Teams
+   **Teams:**
      [`caf_change_team`](#caf_change_team), [`caf_end_team`](#caf_end_team), [`caf_form_team`](#caf_form_team), [`caf_sync_team`](#caf_sync_team), [`caf_get_team`](#caf_get_team), [`caf_team_number`](#caf_team_number)
 
-   Atomic Memory Operation
+   **Atomic Memory Operation:**
      [`caf_atomic_add`](#caf_atomic_add), [`caf_atomic_and`](#caf_atomic_and), [`caf_atomic_cas`](#caf_atomic_cas), [`caf_atomic_define`](#caf_atomic_define), [`caf_atomic_fetch_add`](#caf_atomic_fetch_add), [`caf_atomic_fetch_and`](#caf_atomic_fetch_and), [`caf_atomic_fetch_or`](#caf_atomic_fetch_or), [`caf_atomic_fetch_xor`](#caf_atomic_fetch_xor), [`caf_atomic_or`](#caf_atomic_or), [`caf_atomic_ref`](#caf_atomic_ref), [`caf_atomic_xor`](#caf_atomic_xor)
 
-   Coarray Queries
+   **Coarray Queries:**
      [`caf_lcobound`](#caf_lcobound), [`caf_ucobound`](#caf_ucobound), [`caf_coshape`](#caf_coshape), [`caf_image_index`](#caf_image_index)
 
-   Image Queries
+   **Image Queries:**
      [`caf_num_images`](#caf_num_images), [`caf_this_image`](#caf_this_image), [`caf_failed_images`](#caf_failed_images), [`caf_stopped_images`](#caf_stopped_images), [`caf_image_status`](#caf_image_status)
+
+## Types Descriptions
+
+ **Fortran Intrinsic Derived types**
+   These types will be defined in the runtime library and it is proposed that the compiler will use a rename to use the runtime library definitions for these types in the compiler's implementation of the `ISO_Fortran_Env` module.
+
+   ### `caf_team_type`
+     * implementation for `team_type` from `ISO_Fortran_Env`
+   ### `caf_event_type`
+     * implementation for `event_type` from `ISO_Fortran_Env`
+   ### `caf_lock_type`
+     * implementation for `lock_type` from `ISO_Fortran_Env`
+
+ **Caffeine specific types**
+   ### `caf_co_handle_t`
+     * `caf_co_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler.
+   ### `caf_async_handle_t`
+     * `caf_async_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler. This type will help the runtime library track and provide asynchrony.
+   ### `caf_source_loc_t`
+     * `caf_source_loc_t` will be used to track the location of the critical construct blocks. The runtime library will handle critical constructs, and not expect the compiler to rewrite them as blocks with lock and unlock statements. This would be burdensome on the compiler because a lock_type variable would need to be declared, but as it needs to be a coarray, it would have to hoist its (REMOVE_NOTE: reword?!?!) declaration. TODO_DECISION: The compiler will control the implementation of the type and pass it off to the runtime library OR The runtime library will control the implementation of the type and receive the required information from the compiler to create the needed instances of the type.
 
 
 ## Common arguments' descriptions
 
  ### `coarray_handle`
-   * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking)
+   * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async)
    * scalar of type `caf_co_handle_t`
    * This argument is a handle for the established coarray. The handle will be created when the coarray is established.
  ### `coarray_handles`
    * array of type `caf_co_handle_t`
+ ### `async_handle`
+   * Argument for [`caf_get_async`](#caf_get_async), [`caf_async_wait_for`](#caf_async_wait_for), [`caf_async_try_for`](#caf_async_try_for)
+   * scalar of type `caf_async_handle_t`
+   * This argument is
+ ### `finished`
+   * Argument for [`caf_async_try_for`](#caf_async_try_for)
+   * scalar of type `caf_async_handle_t`
+   * This argument is
  ### `coindices`
-   * 1d array of type `integer`, dimension(:)
+   * 1d assumed-shape array of type `integer`
  ### `target`
-   * 1d array of type(*), dimension(..)
+   * assumed-rank array of `type(*)`
+   * (REMOVE_NOTE: Is this note true for the puts and gets? And not just the atomics?) The location of this argument is the relevant information, not its value. This means that the compiler needs to ensure that when codegen (REMOVE_NOTE: ?) occurs, this argument is pass by reference and there is no copy made. The location of `target` is needed to compute the offset when the atomic operations' `atom` dummy argument is part of a derived type.
  ### `value`
+   * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async)
+   * assumed-rank array of `type(*)`
+ ### `source`
+   * Argument for [`caf_get_async`](#caf_get_async)
+   * assumed-rank array of `type(*)`
  ### `team`
+   * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking)
+   * scalar of type `team_type`
  ### `team_number`
+   * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking)
+   * scalar of type `integer`
  ### `stat`
-  * Argument for [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum)
-  * of type `integer`
-  * if no error condition occurs on that image, it is assigned the value `0`
+  * Argument for [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum), [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking)
+  * scalar of type `integer`
+  * if no error condition occurs on that image, it is assigned the value `0` (REMOVE_NOTE: ?)
 
 ## Procedure descriptions
 
@@ -179,7 +212,7 @@ One consequence of the statements being categorized as image control statements 
 
  #### `caf_allocate`
   * **Description**: Calls to `caf_allocate` will be inserted when the compiler wants to allocate a coarray or when there is a statically declared coarray. This procedure allocates memory for a coarray.
-  * **Procedure Interface**: 2 options, see link to pseudo code, based on (yet undecided) choice between whether the compiler implements `image_index`, `coshape`, `lcobound`, and `ucobound` or whether the runtime library implements those
+  * **Procedure Interface**: `subroutine caf_allocate(lbounds, sizes, coarray_handle, local_slice)`
   * **Arguments**:
   * [caf_allocate pseudo code](#caf_allocate-pseudo-code) (temporarily in design doc)
 
@@ -187,6 +220,7 @@ One consequence of the statements being categorized as image control statements 
   * **Description**:
   * **Procedure Interface**: `subroutine caf_deallocate(coarray_handles)`
   * **Arguments**: `coarray_handles` is `intent(out)`
+  * [caf_deallocate pseudo code](#caf_deallocate-pseudo-code) (temporarily in design doc)
 
 ### Coarray Access
 
@@ -196,31 +230,33 @@ One consequence of the statements being categorized as image control statements 
  #### `caf_put`
   * **Description**:
   * **Procedure Interface**: `subroutine caf_put(coarray_handle, coindices, team, team_number, target, value, stat)`
-  * **Arguments**: [`coarray_handle`](#coarray_handle) is `intent(in)`, [`coindices`](#coindices) is `intent(in)`, [`target`](#target) is `intent(in)`
+  * **Arguments**: [`coarray_handle`](#coarray_handle) is `intent(in)`, [`coindices`](#coindices) is `intent(in)`, [`target`](#target) is `intent(in)`, [`value`](#value) is `intent(inout)`, [`team`](#team) is `intent(in)` and `optional`, [`team_number`](#team_number) is `intent(in)` and `optional`, [`stat`](#stat) is `intent(out)` and `optional`
+  * **Notes**: Both optional arguments `team` and `team_number` shall not be present in the same call
   * [caf_put pseudo code](#caf_put-pseudo-code) (temporarily in design doc)
 
  #### `caf_get_blocking`
   * **Description**:
   * **Procedure Interface**: `subroutine caf_get_blocking(coarray_handle, coindices, team, team_number, source, value, stat)`
-  * **Arguments**: [`coarray_handle`](#coarray_handle) is `intent(in)`, [`coindices`](#coindices) is `intent(in)`, [`target`](#target) is `intent(in)`
+  * **Arguments**: [`coarray_handle`](#coarray_handle) is `intent(in)`, [`coindices`](#coindices) is `intent(in)`, [`target`](#target) is `intent(in)`, [`value`](#value) is `intent(in)`, [`team`](#team) is `intent(in)` and `optional`, [`team_number`](#team_number) is `intent(in)` and `optional`, [`stat`](#stat) is `intent(out)` and `optional`
+  * **Notes**: Both optional arguments `team` and `team_number` shall not be present in the same call
 
  #### `caf_get_async`
   * **Description**:
-  * **Procedure Interface**:
-  * **Arguments**:
+  * **Procedure Interface**: `subroutine caf_get_async(coarray_handle, coindices, team, team_number, source, value, stat, async_handle)`
+  * **Arguments**: [`coarray_handle`](#coarray_handle) is `intent(in)`, [`coindices`](#coindices) is `intent(in)`, [`team`](#team) is `intent(in)` and `optional`, [`team_number`](#team_number) is `intent(in)` and `optional`, [`source`](#source) is `intent(in)`, [`value`](#value) is `intent(inout)`, [`stat`](#stat) is `intent(out)`, [`async_handle`](#async_handle) is `intent(out)`
 
 ###  Operation Synchronization
 
  #### `caf_async_wait_for`
-  * **Description**:
-  * **Procedure Interface**:
-  * **Arguments**:
+  * **Description**: This procedure waits until (REMOVE_NOTE: asynchronous?) operation is complete and then consumes the async handle
+  * **Procedure Interface**: `subroutine caf_async_wait_for(async_handle)`
+  * **Arguments**: [`async_handle`](#async_handle) is `intent(inout)`
   * [caf_async_wait_for pseudo code](#caf_async_wait_for-pseudo-code) (temporarily in design doc)
 
  #### `caf_async_try_for`
-  * **Description**:
-  * **Procedure Interface**:
-  * **Arguments**:
+  * **Description**: This procedure consumes the async handle if and only if the operation is complete
+  * **Procedure Interface**: `subroutine caf_async_try_for(async_handle, finished)`
+  * **Arguments**: [`async_handle`](#async_handle) is `intent(inout)`, [`finished`](#finished) is `intent(out)`
   * [caf_async_try_for pseudo code](#caf_async_try_for-pseudo-code) (temporarily in design doc)
 
  #### `caf_sync_memory`
@@ -306,10 +342,13 @@ One consequence of the statements being categorized as image control statements 
 
 ### Atomic Memory Operation
 
+All atomic operations are blocking operations.
+
  #### `caf_atomic_add`
   * **Description**:
-  * **Procedure Interface**:
+  * **Procedure Interface**: TODO_DECISION: `subroutine caf_atomic_add(coarray_handle, coindicies, offset, value, stat)` or `subroutine caf_atomic_add(coarray_handle, coindicies, target, value, stat)`
   * **Arguments**:
+  * [caf_atomic_add pseudo code](#caf_atomic_add-pseudo-code) (temporarily in design doc)
 
  #### `caf_atomic_and`
   * **Description**:
@@ -411,75 +450,6 @@ One consequence of the statements being categorized as image control statements 
   * **Arguments**:
 
 
-### Allocation and deallocation
-
-
-```
-  module subroutine caf_deallocate(coarray_handles)
-    implicit none
-    type(caf_co_handle_t), dimension(:), intent(out) :: coarray_handles
-  end subroutine
-```
-
-### Puts and Gets
-
-  Arguments to `caf_put_blocking` and `caf_get_blocking`:
-
-REMOVE_NOTE: remove following table as integrate information into above argument descriptions
-
-| Argument | Type | Rank | Dimensions | Intent | Additional attributes | Notes |
-| -------- | ---- | ---- | ---------- | ------ | --------------------- | ----- |
-| `target` | `type(*)` | 1 | dimension(..) | `intent(in)` | n/a | ----- |
-| `value`  | `type(*)` | 1 | dimension(..) | `intent(in)` for gets, `intent(inout)` for puts | n/a | ----- |
-| `team` | `team_type` | 0 | n/a | `intent(in)` | optional | Both optional arguments `team` and `team_number` shall not be present in the same call|
-| `team_number` |  `integer` | 0 | n/a | `intent(in)` | optional | Both optional arguments `team` and `team_number` shall not be present in the same call|
-| `stat` | `integer` | 0 | n/a | `intent(out)` | optional | ----- |
-
-  * **Asynchrony:**
-    -   Could be handle based or fence based approaches
-    -   Handle based - return can individual operation handle, later on compiler synchronizes handle
-    -   Fence based - implicit handle operations, closer to MPI
-#
-## Atomic subroutines
-
-  * **caf_atomic_define:**
-    -   Description: ...
-    -   Procedure Interface: ...
-    -   Arguments: ...
-
-  * **caf_atomic_ref:**
-    -   Description: ...
-    -   Procedure Interface: ...
-    -   Arguments: ...
-
-  * **caf_atomic_add:**
-    -   Description: Blocking atomic operation...
-    -   Procedure Interface:   `subroutine caf_atomic_add(coarray_handle, coindicies, offset, value, stat)` or `subroutine caf_atomic_add(coarray_handle, coindicies, target, value, stat)`
-    -   Arguments: ...
-
-
-Current pseudo code. May not stay in design doc.
-
-Option 1 with offset:
-```
-  module subroutine caf_atomic_add(coarray_handle, coindicies, offset, value, stat) ! blocking atomic operation
-    type(caf_co_handle_t) :: coarray_handle
-    integer, intent(in) :: coindices(:)
-    integer :: offset, value, stat
-  end subroutine
-```
-
-Option 2 with target:
-```
-  module subroutine caf_atomic_add(coarray_handle, coindicies, target, value, stat) ! blocking atomic operation
-    type(caf_co_handle_t) :: coarray_handle
-    integer, intent(in) :: coindices(:) ! names image num
-    integer(kind=atomic_int_kind), intent(in) :: target !location of target is relevant, not the value of target, need this to compute the offset when the `atom` dummy argument to the intrinsic is part of a derived type
-    integer :: value, stat
-  end subroutine
-```
-
-
 ## Delegation of tasks between Flang and Caffeine
 
 | Tasks | Flang | Caffeine |
@@ -487,11 +457,10 @@ Option 2 with target:
 | Track corank of coarrays                |     ✓     |           |
 | Track teams associated with a coarray   |     ✓     |           |
 | Assigning variables of type `team-type` |     ✓     |           |
-| Translate critical construct to lock/unlock |     ✓     |           |
 | Track coarrays for implicit deallocation when exiting a scope |     ✓     |           |
 | Initialize a coarray with SOURCE= as part of allocate-stmt |     ✓     |           |
 | Keeping track of corank |     ✓     |     ?      |
-| Implementing the intrinsics `coshape`, `lcobound`, and `ucobound`, `image_index`  |     ?     |     ?     |
+| Implementing the intrinsics `coshape`, `lcobound`, and `ucobound`, `image_index`  |          |     ✓     |
 | Track allocatable coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
 | Team stack abstraction                  |           |     ✓     |
 | `form-team-stmt`                        |           |     ✓     |
@@ -506,25 +475,12 @@ Add to table: teams, events, synchronization statements, critical construct, loc
 
 
 
-
-
 Current pseudo code. May not stay in design doc.
 
 Draft:
 
 #### caf_allocate pseudo code
 
-Compiler-tracks-codescriptor
-```
-  module subroutine caf_allocate(coarray_handle, local_slice)
-    implicit none
-    type(caf_co_handle_t), intent(out) :: coarray_handle
-    type(*), dimension(..), intent(inout) :: local_slice
-  end subroutine
-```
-In this case, compiler would provide `image_index`, `coshape`, `lcobound`, `ucobound`
-
-Caffeine-tracks-codescriptor
 ```
   module subroutine caf_allocate(lbounds, sizes, coarray_handle, local_slice)
     implicit none
@@ -533,8 +489,14 @@ Caffeine-tracks-codescriptor
     integer, dimension(:), intent(in) :: lbounds, sizes !precondition these args must be same size
   end subroutine
 ```
-In this case, Caffeine would provide `image_index`, `coshape`, `lcobound`, `ucobound`
 
+#### caf_deallocate pseudo code
+```
+  module subroutine caf_deallocate(coarray_handles)
+    implicit none
+    type(caf_co_handle_t), dimension(:), intent(out) :: coarray_handles
+  end subroutine
+```
 
 #### caf_put pseudo code
 
@@ -582,8 +544,8 @@ In this case, Caffeine would provide `image_index`, `coshape`, `lcobound`, `ucob
 ```
   module subroutine caf_get_async(coarray_handle, coindices, team, team_number, source, value, stat, async_handle)
     implicit none
-    type(caf_co_handle_t), intent(in) :: coarray_handle
-    integer, intent(in) :: coindices(:)
+    type(caf_co_handle_t),  intent(in) :: coarray_handle
+    integer, dimension(:),  intent(in) :: coindices
     type(*), dimension(..), intent(in) :: source
     type(*), dimension(..), intent(inout) :: value ! may need asynchronous attribute or may be implicitly asynchronous
     type(team_type), optional, intent(in) :: team
@@ -598,7 +560,7 @@ In this case, Caffeine would provide `image_index`, `coshape`, `lcobound`, `ucob
 ```
   ! waits until operation
   ! consumes handle
-  module subroutine caf_wait_for(async_handle)
+  module subroutine caf_async_wait_for(async_handle)
     implicit none
     type(caf_async_handle_t), intent(inout) :: async_handle
   end subroutine
@@ -608,7 +570,7 @@ In this case, Caffeine would provide `image_index`, `coshape`, `lcobound`, `ucob
 
 ```
   ! consumes handle IF finished
-  module subroutine caf_try_for(async_handle, finished)
+  module subroutine caf_async_try_for(async_handle, finished)
     implicit none
     type(caf_async_handle_t), intent(inout) :: async_handle
     logical, intent(out) :: finished
@@ -617,11 +579,37 @@ In this case, Caffeine would provide `image_index`, `coshape`, `lcobound`, `ucob
 ```
 
 
+#### caf_atomic_add pseudo code
 
+Option 1 with offset:
+```
+  module subroutine caf_atomic_add(coarray_handle, coindicies, offset, value, stat)
+    type(caf_co_handle_t) :: coarray_handle
+    integer, intent(in) :: coindices(:)
+    integer :: offset, value, stat
+  end subroutine
+```
 
+Option 2 with target:
+```
+  module subroutine caf_atomic_add(coarray_handle, coindicies, target, value, stat)
+    type(caf_co_handle_t) :: coarray_handle
+    integer, intent(in) :: coindices(:) ! names image num
+    integer(kind=atomic_int_kind), intent(in) :: target !location of target is relevant, not the value of target, need this to compute the offset when the `atom` dummy argument to the intrinsic is part of a derived type
+    integer :: value, stat
+  end subroutine
+```
 
 
 ## Berkeley Lab internal Notes: (REMOVE_NOTES before submission)
+
+
+  * **Asynchrony:**
+    -   Could be handle based or fence based approaches
+    -   Handle based - return can individual operation handle, later on compiler synchronizes handle
+    -   Fence based - implicit handle operations, closer to MPI
+
+
 
 Same non-blocking semantics (has to be started and finished in the same segment) will likely apply to collectives, use caf_wait_for, caf_try_for, etc
 Should change team and critical be non-blocking? sync-all?)
@@ -639,7 +627,7 @@ Should change team and critical be non-blocking? sync-all?)
    end type
    ```
 
-TODOs:
+REMOVE_NOTEs:
     allow for non-blocking collective subroutines
     need to be able to track puts in flight, may need a write buffer, record boundaries in a hash table struct
     every single rma needs to check the table to see if there is a conflicting overlap
