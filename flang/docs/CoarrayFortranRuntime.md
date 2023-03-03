@@ -93,23 +93,24 @@ One consequence of the statements being categorized as image control statements 
 
 ## Types Descriptions
 
- **Fortran Intrinsic Derived types**
+ ### Fortran Intrinsic Derived types
    These types will be defined in the runtime library and it is proposed that the compiler will use a rename to use the runtime library definitions for these types in the compiler's implementation of the `ISO_Fortran_Env` module.
 
-   #### `caf_team_type`
-     * implementation for `team_type` from `ISO_Fortran_Env`
-   #### `caf_event_type`
-     * implementation for `event_type` from `ISO_Fortran_Env`
-   #### `caf_lock_type`
-     * implementation for `lock_type` from `ISO_Fortran_Env`
+ #### `caf_team_type`
+   * implementation for `team_type` from `ISO_Fortran_Env`
+ #### `caf_event_type`
+   * implementation for `event_type` from `ISO_Fortran_Env`
+ #### `caf_lock_type`
+   * implementation for `lock_type` from `ISO_Fortran_Env`
 
- **Caffeine specific types**
-   #### `caf_co_handle_t`
-     * `caf_co_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler.
-   #### `caf_async_handle_t`
-     * `caf_async_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler. This type will help the runtime library track and provide asynchrony.
-   #### `caf_source_loc_t`
-     * `caf_source_loc_t` will be used to track the location of the critical construct blocks. The runtime library will handle critical constructs, and not expect the compiler to rewrite them as blocks with lock and unlock statements. This would be burdensome on the compiler because a lock_type variable would need to be declared, but as it needs to be a coarray, it would have to hoist its (REMOVE_NOTE: reword?!?!) declaration. TODO_DECISION: The compiler will control the implementation of the type and pass it off to the runtime library OR The runtime library will control the implementation of the type and receive the required information from the compiler to create the needed instances of the type.
+ ### Caffeine specific types
+
+ #### `caf_co_handle_t`
+   * `caf_co_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler.
+ #### `caf_async_handle_t`
+   * `caf_async_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler. This type will help the runtime library track and provide asynchrony.
+ #### `caf_source_loc_t`
+   * `caf_source_loc_t` will be used to track the location of the critical construct blocks. The runtime library will handle critical constructs, and not expect the compiler to rewrite them as blocks with lock and unlock statements. This would be burdensome on the compiler because a lock_type variable would need to be declared, but as it needs to be a coarray, it would have to hoist its (REMOVE_NOTE: reword?!?!) declaration. TODO_DECISION: The compiler will control the implementation of the type and pass it off to the runtime library OR The runtime library will control the implementation of the type and receive the required information from the compiler to create the needed instances of the type.
 
 
 ## Common arguments' descriptions
@@ -233,6 +234,12 @@ One consequence of the statements being categorized as image control statements 
   * **Arguments**: [`coarray_handle`](#coarray_handle) is `intent(in)`, [`coindices`](#coindices) is `intent(in)`, [`target`](#target) is `intent(in)`, [`value`](#value) is `intent(inout)`, [`team`](#team) is `intent(in)` and `optional`, [`team_number`](#team_number) is `intent(in)` and `optional`, [`stat`](#stat) is `intent(out)` and `optional`
   * **Notes**: Both optional arguments `team` and `team_number` shall not be present in the same call
   * [caf_put pseudo code](#caf_put-pseudo-code) (temporarily in design doc)
+
+(REMOVE_NOTE): Is this procedure going to be visible to the compiler? If not, do we include discussions of it here?
+ #### `caf_end_segment`
+  * **Description**: This procedure ends a segment. Any puts that are still in flight will be committed (and any caches will be thrown away TODO_DECISION: if we decide to do caches). Calls to this procedure will be side effects of invocations of the image control statements. It is not a synchronizing operation.
+  * **Procedure Interface**: `subroutine caf_end_segment()`
+  * **Arguments**: n/a (REMOVE_NOTE: is this true? or is it just that we haven't sketched out the args yet?)
 
  #### `caf_get_blocking`
   * **Description**:
