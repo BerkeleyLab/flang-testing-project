@@ -96,56 +96,56 @@ One consequence of the statements being categorized as image control statements 
  **Fortran Intrinsic Derived types**
    These types will be defined in the runtime library and it is proposed that the compiler will use a rename to use the runtime library definitions for these types in the compiler's implementation of the `ISO_Fortran_Env` module.
 
-   ### `caf_team_type`
+   #### `caf_team_type`
      * implementation for `team_type` from `ISO_Fortran_Env`
-   ### `caf_event_type`
+   #### `caf_event_type`
      * implementation for `event_type` from `ISO_Fortran_Env`
-   ### `caf_lock_type`
+   #### `caf_lock_type`
      * implementation for `lock_type` from `ISO_Fortran_Env`
 
  **Caffeine specific types**
-   ### `caf_co_handle_t`
+   #### `caf_co_handle_t`
      * `caf_co_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler.
-   ### `caf_async_handle_t`
+   #### `caf_async_handle_t`
      * `caf_async_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler. This type will help the runtime library track and provide asynchrony.
-   ### `caf_source_loc_t`
+   #### `caf_source_loc_t`
      * `caf_source_loc_t` will be used to track the location of the critical construct blocks. The runtime library will handle critical constructs, and not expect the compiler to rewrite them as blocks with lock and unlock statements. This would be burdensome on the compiler because a lock_type variable would need to be declared, but as it needs to be a coarray, it would have to hoist its (REMOVE_NOTE: reword?!?!) declaration. TODO_DECISION: The compiler will control the implementation of the type and pass it off to the runtime library OR The runtime library will control the implementation of the type and receive the required information from the compiler to create the needed instances of the type.
 
 
 ## Common arguments' descriptions
 
- ### `coarray_handle`
+ #### `coarray_handle`
    * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async)
    * scalar of type `caf_co_handle_t`
    * This argument is a handle for the established coarray. The handle will be created when the coarray is established.
- ### `coarray_handles`
+ #### `coarray_handles`
    * array of type `caf_co_handle_t`
- ### `async_handle`
+ #### `async_handle`
    * Argument for [`caf_get_async`](#caf_get_async), [`caf_async_wait_for`](#caf_async_wait_for), [`caf_async_try_for`](#caf_async_try_for)
    * scalar of type `caf_async_handle_t`
    * This argument is
- ### `finished`
+ #### `finished`
    * Argument for [`caf_async_try_for`](#caf_async_try_for)
    * scalar of type `caf_async_handle_t`
    * This argument is
- ### `coindices`
+ #### `coindices`
    * 1d assumed-shape array of type `integer`
- ### `target`
+ #### `target`
    * assumed-rank array of `type(*)`
    * (REMOVE_NOTE: Is this note true for the puts and gets? And not just the atomics?) The location of this argument is the relevant information, not its value. This means that the compiler needs to ensure that when codegen (REMOVE_NOTE: ?) occurs, this argument is pass by reference and there is no copy made. The location of `target` is needed to compute the offset when the atomic operations' `atom` dummy argument is part of a derived type.
- ### `value`
+ #### `value`
    * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async)
    * assumed-rank array of `type(*)`
- ### `source`
+ #### `source`
    * Argument for [`caf_get_async`](#caf_get_async)
    * assumed-rank array of `type(*)`
- ### `team`
+ #### `team`
    * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking)
    * scalar of type `team_type`
- ### `team_number`
+ #### `team_number`
    * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking)
    * scalar of type `integer`
- ### `stat`
+ #### `stat`
   * Argument for [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum), [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking)
   * scalar of type `integer`
   * if no error condition occurs on that image, it is assigned the value `0` (REMOVE_NOTE: ?)
