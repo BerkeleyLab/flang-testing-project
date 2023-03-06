@@ -480,29 +480,6 @@ All atomic operations are blocking operations.
   * **Arguments**:
 
 
-## Delegation of tasks between Flang and Caffeine
-
-| Tasks | Flang | Caffeine |
-| ----  | ----- | -------- |
-| Track corank of coarrays                |     ✓     |           |
-| Track teams associated with a coarray   |     ✓     |           |
-| Assigning variables of type `team-type` |     ✓     |           |
-| Track coarrays for implicit deallocation when exiting a scope |     ✓     |           |
-| Initialize a coarray with SOURCE= as part of allocate-stmt |     ✓     |           |
-| Keeping track of corank |     ✓     |     ?      |
-| Implementing the intrinsics `coshape`, `lcobound`, and `ucobound`, `image_index`  |          |     ✓     |
-| Track allocatable coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
-| Team stack abstraction                  |           |     ✓     |
-| `form-team-stmt`                        |           |     ✓     |
-| `change-team-stmt`                      |           |     ✓     |
-| `end-team-stmt`                         |           |     ✓     |
-| Allocate a coarray                      |           |     ✓     |
-| Deallocate a coarray                    |           |     ✓     |
-| Reference a coindexed-object             |           |     ✓     |
-
-
-Add to table: teams, events, synchronization statements, critical construct, locks
-
 
 Current pseudo code. May not stay in design doc.
 
