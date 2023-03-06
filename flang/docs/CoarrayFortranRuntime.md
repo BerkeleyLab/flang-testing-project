@@ -39,14 +39,14 @@ In addition to being able to support syntax related to the above features, compi
 One consequence of the statements being categorized as image control statements will be the need to restrict code movement by optimizing compilers.
 
 # Proposed solution
-  This design document proposes an interface to support the above features, named Fortran Parallel Runtime Interface.  Implementations of some parts of the interface exist in [Caffeine], a parallel runtime library targeting coarray Fortran compilers.  By defining a library-agnostic interface, we envision facilitating the development of alternative parallel runtime libraries that support the same interface.  One benefit of this approach is the ability to vary the communication substrate.  For example, Caffeine uses the [GASNet-EX] exascale networking middleware, whereas it might also be possible to develop wrappers that would support the proposed interface with [OpenCoarrays], which uses the Message Passing Interface ([MPI]). A central aim of this document is to use a parallel runtime interface in standard Fortran syntax, which enables us to leverage the Fortran to succinctly express various properties of the procedure interfaces, including argument attributes.  See [Rouson and Bonachea (2022)] for additional details.
+  This design document proposes an interface to support the above features, named Fortran Parallel Runtime Interface.  Implementations of some parts of the interface exist in [Caffeine], a parallel runtime library targeting coarray Fortran compilers.  By defining a library-agnostic interface, we envision facilitating the development of alternative parallel runtime libraries that support the same interface.  One benefit of this approach is the ability to vary the communication substrate.  For example, Caffeine uses the [GASNet-EX] exascale networking middleware, whereas it might also be possible to develop wrappers that would support the proposed interface with [OpenCoarrays], which uses the Message Passing Interface ([MPI]). A central aim of this document is to use a parallel runtime interface in standard Fortran syntax, which enables us to leverage Fortran to succinctly express various properties of the procedure interfaces, including argument attributes.  See [Rouson and Bonachea (2022)] for additional details.
 
 # Interface overview
   This document proposes a design for the Fortran Parallel Runtime Interface. It outlines which tasks will be the responsibility of the Fortran compiler and which tasks will be the responsibility of the runtime library. For the rest of the document, we will refer to the design in terms of Flang and Caffeine.
 
 ## Fortran Parallel Runtime Interface
 
-  The Fortran Parallel Runtime Interface is a proposed interface in which the runtime library is responsible for coarray allocation, deallocation and accesses, operation and image synchronization, atomic operations, events, and teams. In this interface, the compiler is responsible for transforming the source code to add Fortran procedure calls to the necessary runtime library procedures. Below you can find a table showing the delegation of tasks between the compile and the runtime library.
+  The Fortran Parallel Runtime Interface is a proposed interface in which the runtime library is responsible for coarray allocation, deallocation and accesses, image synchronization, atomic operations, events, and teams. In this interface, the compiler is responsible for transforming the source code to add Fortran procedure calls to the necessary runtime library procedures. Below you can find a table showing the delegation of tasks between the compiler and the runtime library.
 
 ## Delegation of tasks between Flang and Caffeine
 
@@ -57,7 +57,6 @@ One consequence of the statements being categorized as image control statements 
 | Assigning variables of type `team-type` |     ✓     |           |
 | Track coarrays for implicit deallocation when exiting a scope |     ✓     |           |
 | Initialize a coarray with SOURCE= as part of allocate-stmt |     ✓     |           |
-| Keeping track of corank |     ✓     |     ?      |
 | Implementing the intrinsics `coshape`, `lcobound`, and `ucobound`, `image_index`  |          |     ✓     |
 | Track allocatable coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
 | Team stack abstraction                  |           |     ✓     |
