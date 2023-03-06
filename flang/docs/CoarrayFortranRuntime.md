@@ -46,6 +46,28 @@ One consequence of the statements being categorized as image control statements 
 
 ## Fortran Parallel Runtime Interface
 
+  The Fortran Parallel Runtime Interface is a proposed interface in which the runtime library is responsible for coarray allocation, deallocation and accesses, operation and image synchronization, atomic operations, events, and teams. In this interface, the compiler is responsible for transforming the source code to add Fortran procedure calls to the necessary runtime library procedures. Below you can find a table showing the delegation of tasks between the compile and the runtime library.
+
+## Delegation of tasks between Flang and Caffeine
+
+| Tasks | Flang | Caffeine |
+| ----  | ----- | -------- |
+| Track corank of coarrays                |     ✓     |           |
+| Track teams associated with a coarray   |     ✓     |           |
+| Assigning variables of type `team-type` |     ✓     |           |
+| Track coarrays for implicit deallocation when exiting a scope |     ✓     |           |
+| Initialize a coarray with SOURCE= as part of allocate-stmt |     ✓     |           |
+| Keeping track of corank |     ✓     |     ?      |
+| Implementing the intrinsics `coshape`, `lcobound`, and `ucobound`, `image_index`  |          |     ✓     |
+| Track allocatable coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
+| Team stack abstraction                  |           |     ✓     |
+| `form-team-stmt`                        |           |     ✓     |
+| `change-team-stmt`                      |           |     ✓     |
+| `end-team-stmt`                         |           |     ✓     |
+| Allocate a coarray                      |           |     ✓     |
+| Deallocate a coarray                    |           |     ✓     |
+| Reference a coindexed-object             |           |     ✓     |
+
 ## Types
 
  **Provided Fortran types:** [`caf_event_type`](#caf_event_type), [`caf_team_type`](#caf_team_type), [`caf_lock_type`](#caf_lock_type)
@@ -116,20 +138,21 @@ One consequence of the statements being categorized as image control statements 
 ## Common arguments' descriptions
 
  #### `coarray_handle`
-   * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async)
-   * scalar of type `caf_co_handle_t`
+   * Argument for [`caf_allocate`](#caf_allocate), [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async) and all of the [atomic operations](#atomic-memory-operation)
+   * scalar of type [`caf_co_handle_t`](#caf_co_handle_t)
    * This argument is a handle for the established coarray. The handle will be created when the coarray is established.
  #### `coarray_handles`
-   * array of type `caf_co_handle_t`
+   * array of type [`caf_co_handle_t`](#caf_co_handle_t)
  #### `async_handle`
    * Argument for [`caf_get_async`](#caf_get_async), [`caf_async_wait_for`](#caf_async_wait_for), [`caf_async_try_for`](#caf_async_try_for)
-   * scalar of type `caf_async_handle_t`
+   * scalar of type [`caf_async_handle_t`](#caf_async_handle_t)
    * This argument is
  #### `finished`
    * Argument for [`caf_async_try_for`](#caf_async_try_for)
-   * scalar of type `caf_async_handle_t`
+   * scalar of type [`caf_async_handle_t`](#caf_async_handle_t)
    * This argument is
  #### `coindices`
+   * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async)
    * 1d assumed-shape array of type `integer`
  #### `target`
    * assumed-rank array of `type(*)`
@@ -212,15 +235,15 @@ One consequence of the statements being categorized as image control statements 
 ### Allocation and deallocation
 
  #### `caf_allocate`
-  * **Description**: Calls to `caf_allocate` will be inserted when the compiler wants to allocate a coarray or when there is a statically declared coarray. This procedure allocates memory for a coarray.
+  * **Description**: Calls to `caf_allocate` will be inserted when the compiler wants to allocate a coarray or when there is a statically declared coarray. This procedure allocates memory for a coarray. The `coarray_handle` dummy argument will pass back a handle that the runtime library will have created to be used for all future accesses and deallocation of the associated coarray.
   * **Procedure Interface**: `subroutine caf_allocate(lbounds, sizes, coarray_handle, local_slice)`
-  * **Arguments**:
+  * **Arguments**: [`lbounds`](#lbounds) is `intent(in)`, [`sizes`](#sizes) is `intent(in)`, [`coarray_handle`](#coarray_handle) is `intent(out)`, [`local_slice`](#local_slice) is `intent(inout)`
   * [caf_allocate pseudo code](#caf_allocate-pseudo-code) (temporarily in design doc)
 
  #### `caf_deallocate`
-  * **Description**:
+  * **Description**: This procedure
   * **Procedure Interface**: `subroutine caf_deallocate(coarray_handles)`
-  * **Arguments**: `coarray_handles` is `intent(out)`
+  * **Arguments**: [`coarray_handles`](#coarray_handles) is `intent(out)` (REMOVE_NOTE: is coarray_handles supposed to be `intent(out)`?)
   * [caf_deallocate pseudo code](#caf_deallocate-pseudo-code) (temporarily in design doc)
 
 ### Coarray Access
@@ -479,7 +502,6 @@ All atomic operations are blocking operations.
 
 
 Add to table: teams, events, synchronization statements, critical construct, locks
-
 
 
 Current pseudo code. May not stay in design doc.
