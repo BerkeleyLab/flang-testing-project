@@ -5,7 +5,7 @@
    SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 -->
-# THIS IS A WORK IN PROGRESS - DECISIONS REGARDING THE DESIGNS DISCUSSED IN THIS DOCUMENT ARE ONGOING AND MAY CHANGE
+# THIS IS A WORK IN PROGRESS - DECISIONS REGARDING THE DESIGNS DISCUSSED IN THIS DOCUMENT ARE ONGOING AND MAY CHANGE AND THE DOCUMENT IS INCOMPLETE
 
 
 # Problem description
@@ -39,39 +39,44 @@ In addition to being able to support syntax related to the above features, compi
 One consequence of the statements being categorized as image control statements will be the need to restrict code movement by optimizing compilers.
 
 # Proposed solution
-  This design document proposes an interface to support the above features, named Fortran Parallel Runtime Interface.  Implementations of some parts of the interface exist in [Caffeine], a parallel runtime library targeting coarray Fortran compilers.  By defining a library-agnostic interface, we envision facilitating the development of alternative parallel runtime libraries that support the same interface.  One benefit of this approach is the ability to vary the communication substrate.  For example, Caffeine uses the [GASNet-EX] exascale networking middleware, whereas it might also be possible to develop wrappers that would support the proposed interface with [OpenCoarrays], which uses the Message Passing Interface ([MPI]). A central aim of this document is to use a parallel runtime interface in standard Fortran syntax, which enables us to leverage Fortran to succinctly express various properties of the procedure interfaces, including argument attributes.  See [Rouson and Bonachea (2022)] for additional details.
+  This design document proposes an interface to support the above features, named Coarray Fortran Parallel Runtime Interface.  Implementations of some parts of the interface exist in [Caffeine], a parallel runtime library targeting coarray Fortran compilers.  By defining a library-agnostic interface, we envision facilitating the development of alternative parallel runtime libraries that support the same interface.  One benefit of this approach is the ability to vary the communication substrate.  For example, Caffeine uses the [GASNet-EX] exascale networking middleware, whereas it might also be possible to develop wrappers that would support the proposed interface with [OpenCoarrays], which uses the Message Passing Interface ([MPI]). A central aim of this document is to use a parallel runtime interface in standard Fortran syntax, which enables us to leverage Fortran to succinctly express various properties of the procedure interfaces, including argument attributes.  See [Rouson and Bonachea (2022)] for additional details.
 
 # Interface overview
-  This document proposes a design for the Fortran Parallel Runtime Interface. It outlines which tasks will be the responsibility of the Fortran compiler and which tasks will be the responsibility of the runtime library. For the rest of the document, we will refer to the design in terms of Flang and Caffeine.
+  This document proposes a design for the Coarray Fortran Parallel Runtime Interface. It outlines which tasks will be the responsibility of the Fortran compiler and which tasks will be the responsibility of the runtime library.
 
-## Fortran Parallel Runtime Interface
+## Coarray Fortran (CAF) Parallel Runtime Interface
 
-  The Fortran Parallel Runtime Interface is a proposed interface in which the runtime library is responsible for coarray allocation, deallocation and accesses, image synchronization, atomic operations, events, and teams. In this interface, the compiler is responsible for transforming the source code to add Fortran procedure calls to the necessary runtime library procedures. Below you can find a table showing the delegation of tasks between the compiler and the runtime library.
+  The Coarray Fortran Parallel Runtime Interface is a proposed interface in which the runtime library is responsible for coarray allocation, deallocation and accesses, image synchronization, atomic operations, events, and teams. In this interface, the compiler is responsible for transforming the source code to add Fortran procedure calls to the necessary runtime library procedures. Below you can find a table showing the delegation of tasks between the compiler and the runtime library.
 
-## Delegation of tasks between Flang and Caffeine
+## Delegation of tasks between the Fortran compiler and the runtime library
 
-| Tasks | Flang | Caffeine |
+| Tasks | Fortran compiler | Runtime library |
 | ----  | ----- | -------- |
+| Establish and initialize static coarrays prior to `main`        |     ✓     |           |
 | Track corank of coarrays                |     ✓     |           |
-| Track teams associated with a coarray   |     ✓     |           |
 | Assigning variables of type `team-type` |     ✓     |           |
-| Track coarrays for implicit deallocation when exiting a scope |     ✓     |           |
+| Track locals coarrays for implicit deallocation when exiting a scope |     ✓     |           |
 | Initialize a coarray with SOURCE= as part of allocate-stmt |     ✓     |           |
 | Implementing the intrinsics `coshape`, `lcobound`, and `ucobound`, `image_index`  |          |     ✓     |
-| Track allocatable coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
+| Track coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
 | Team stack abstraction                  |           |     ✓     |
 | `form-team-stmt`                        |           |     ✓     |
 | `change-team-stmt`                      |           |     ✓     |
 | `end-team-stmt`                         |           |     ✓     |
 | Allocate a coarray                      |           |     ✓     |
 | Deallocate a coarray                    |           |     ✓     |
-| Reference a coindexed-object             |           |     ✓     |
+| Reference a coindexed-object            |           |     ✓     |
+
+
+## Establish and initialize static coarrays prior to `main` (REMOVE_NOTE: MOVE SOMEWHERE BELOW)
+
+  Compiler will need to: call caf_init, call caf_allocate ... for each coarray and in the right order. And then copy any initializers.
 
 ## Types
 
  **Provided Fortran types:** [`caf_event_type`](#caf_event_type), [`caf_team_type`](#caf_team_type), [`caf_lock_type`](#caf_lock_type)
 
- **Caffeine specific types:** [`caf_co_handle_t`](#caf_co_handle_t), [`caf_async_handle_t`](#caf_async_handle_t), [`caf_source_loc_t`](#caf_source_loc_t)
+ **Runtime library specific types:** [`caf_co_handle_t`](#caf_co_handle_t), [`caf_async_handle_t`](#caf_async_handle_t), [`caf_source_loc_t`](#caf_source_loc_t)
 
 ## Common arguments
 
@@ -89,7 +94,7 @@ One consequence of the statements being categorized as image control statements 
      [`caf_allocate`](#caf_allocate), [`caf_deallocate`](#caf_deallocate)
 
    **Coarray Access:**
-     [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async)
+     [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
 
    **Operation Synchronization:**
      [`caf_async_wait_for`](#caf_aync_wait_for), [`caf_async_try_for`](#caf_async_try_for), [`caf_sync_memory`](#caf_sync_memory)
@@ -124,7 +129,7 @@ One consequence of the statements being categorized as image control statements 
  #### `caf_lock_type`
    * implementation for `lock_type` from `ISO_Fortran_Env`
 
- ### Caffeine specific types
+ ### Runtime library specific types
 
  #### `caf_co_handle_t`
    * `caf_co_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler.
@@ -137,7 +142,7 @@ One consequence of the statements being categorized as image control statements 
 ## Common arguments' descriptions
 
  #### `coarray_handle`
-   * Argument for [`caf_allocate`](#caf_allocate), [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async) and all of the [atomic operations](#atomic-memory-operation)
+   * Argument for [`caf_allocate`](#caf_allocate), [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async) and all of the [atomic operations](#atomic-memory-operation)
    * scalar of type [`caf_co_handle_t`](#caf_co_handle_t)
    * This argument is a handle for the established coarray. The handle will be created when the coarray is established.
  #### `coarray_handles`
@@ -151,25 +156,25 @@ One consequence of the statements being categorized as image control statements 
    * scalar of type [`caf_async_handle_t`](#caf_async_handle_t)
    * This argument is
  #### `coindices`
-   * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async)
+   * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
    * 1d assumed-shape array of type `integer`
  #### `target`
    * assumed-rank array of `type(*)`
    * (REMOVE_NOTE: Is this note true for the puts and gets? And not just the atomics?) The location of this argument is the relevant information, not its value. This means that the compiler needs to ensure that when codegen (REMOVE_NOTE: ?) occurs, this argument is pass by reference and there is no copy made. The location of `target` is needed to compute the offset when the atomic operations' `atom` dummy argument is part of a derived type.
  #### `value`
-   * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking), [`caf_get_async`](#caf_get_async)
+   * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
    * assumed-rank array of `type(*)`
  #### `source`
    * Argument for [`caf_get_async`](#caf_get_async)
    * assumed-rank array of `type(*)`
  #### `team`
-   * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking)
+   * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get)
    * scalar of type `team_type`
  #### `team_number`
-   * Argument for [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking)
+   * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get)
    * scalar of type `integer`
  #### `stat`
-  * Argument for [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum), [`caf_put`](#caf_put), [`caf_get_blocking`](#caf_get_blocking)
+  * Argument for [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum), [`caf_put`](#caf_put), [`caf_get`](#caf_get)
   * scalar of type `integer`
   * if no error condition occurs on that image, it is assigned the value `0` (REMOVE_NOTE: ?)
 
@@ -251,7 +256,7 @@ One consequence of the statements being categorized as image control statements 
 
 
  #### `caf_put`
-  * **Description**:
+  * **Description**: Blocks on local completion. (REMOVE_NOTE: eventually would like a caf_put that doesn't block on local completion).
   * **Procedure Interface**: `subroutine caf_put(coarray_handle, coindices, team, team_number, target, value, stat)`
   * **Arguments**: [`coarray_handle`](#coarray_handle) is `intent(in)`, [`coindices`](#coindices) is `intent(in)`, [`target`](#target) is `intent(in)`, [`value`](#value) is `intent(inout)`, [`team`](#team) is `intent(in)` and `optional`, [`team_number`](#team_number) is `intent(in)` and `optional`, [`stat`](#stat) is `intent(out)` and `optional`
   * **Notes**: Both optional arguments `team` and `team_number` shall not be present in the same call
@@ -263,9 +268,9 @@ One consequence of the statements being categorized as image control statements 
   * **Procedure Interface**: `subroutine caf_end_segment()`
   * **Arguments**: n/a (REMOVE_NOTE: is this true? or is it just that we haven't sketched out the args yet?)
 
- #### `caf_get_blocking`
+ #### `caf_get`
   * **Description**:
-  * **Procedure Interface**: `subroutine caf_get_blocking(coarray_handle, coindices, team, team_number, source, value, stat)`
+  * **Procedure Interface**: `subroutine caf_get(coarray_handle, coindices, team, team_number, source, value, stat)`
   * **Arguments**: [`coarray_handle`](#coarray_handle) is `intent(in)`, [`coindices`](#coindices) is `intent(in)`, [`target`](#target) is `intent(in)`, [`value`](#value) is `intent(in)`, [`team`](#team) is `intent(in)` and `optional`, [`team_number`](#team_number) is `intent(in)` and `optional`, [`stat`](#stat) is `intent(out)` and `optional`
   * **Notes**: Both optional arguments `team` and `team_number` shall not be present in the same call
 
@@ -529,10 +534,10 @@ Draft:
   end subroutine
 ```
 
-#### caf_get_blocking pseudo code
+#### caf_get pseudo code
 
 ```
-  module subroutine caf_get_blocking(coarray_handle, coindices, team, team_number, source, value, stat)
+  module subroutine caf_get(coarray_handle, coindices, team, team_number, source, value, stat)
     implicit none
     type(caf_co_handle_t), intent(in) :: coarray_handle
     integer, intent(in) :: coindices(:)
