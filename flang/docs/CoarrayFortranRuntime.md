@@ -43,28 +43,31 @@ One consequence of the statements being categorized as image control statements 
 
 ## Coarray Fortran (CAF) Parallel Runtime Interface
 
-  The Coarray Fortran Parallel Runtime Interface is a proposed interface in which the runtime library is responsible for coarray allocation, deallocation and accesses, image synchronization, atomic operations, events, and teams. In this interface, the compiler is responsible for transforming the source code to add Fortran procedure calls to the necessary runtime library procedures. Below you can find a table showing the delegation of tasks between the compiler and the runtime library. The interface is designed for portability across shared and distributed memory machines, different operating systems, and multiple architectures. The Caffeine implementation,[see below](#caffeine-lbl's-implementation-of-the-coarray-fortran-parallel-runtime-interface), of the Coarray Fortran Parallel Runtime Interface plans to support the following architectures: x86_64, PowerPC64, AArch64, with the possibility of supporting more as requested. Implementations of this interface is intended as an augmentation for the compiler's own runtime library. While the interface can support multiple implementations, we envision needing to build the runtime library as part of installing the compiler.
+  The Coarray Fortran Parallel Runtime Interface is a proposed interface in which the runtime library is responsible for coarray allocation, deallocation and accesses, image synchronization, atomic operations, events, and teams. In this interface, the compiler is responsible for transforming the source code to add Fortran procedure calls to the necessary runtime library procedures. Below you can find a table showing the delegation of tasks between the compiler and the runtime library. The interface is designed for portability across shared and distributed memory machines, different operating systems, and multiple architectures. The Caffeine implementation, [see below](#caffeine-lbl's-implementation-of-the-coarray-fortran-parallel-runtime-interface), of the Coarray Fortran Parallel Runtime Interface plans to support the following architectures: x86_64, PowerPC64, AArch64, with the possibility of supporting more as requested. Implementations of this interface is intended as an augmentation for the compiler's own runtime library. While the interface can support multiple implementations, we envision needing to build the runtime library as part of installing the compiler.
 
 ## Delegation of tasks between the Fortran compiler and the runtime library
 
-The following table outlines which tasks will be the responsibility of the Fortran compiler and which tasks will be the responsibility of the runtime library.
+The following table outlines which tasks will be the responsibility of the Fortran compiler and which tasks will be the responsibility of the runtime library. A '✓' in the Fortran compiler column indicates that the compiler has the primary responsibility for that task, while a '✓' in the Runtime library column indicates that the compiler will invoke the runtime library to perform the task and the runtime library has primary responsibility for the task's implementation. See the [Runtime Interface Procedures](#runtime-interface-procedures) for the list of runtime library procedures that the compiler will invoke.
+
 
 | Tasks | Fortran compiler | Runtime library |
 | ----  | ----- | -------- |
-| Establish and initialize static coarrays prior to `main` -[see more](#establish-and-initialize-static-coarrays-priorto-`main`)        |     ✓     |           |
+| Establish and initialize static coarrays prior to `main` - [see more](#establish-and-initialize-static-coarrays-prior-to-`main`)        |     ✓     |           |
 | Track corank of coarrays                |     ✓     |           |
 | Assigning variables of type `team-type` |     ✓     |           |
 | Track locals coarrays for implicit deallocation when exiting a scope |     ✓     |           |
 | Initialize a coarray with SOURCE= as part of allocate-stmt |     ✓     |           |
-| Implementing the intrinsics `coshape`, `lcobound`, and `ucobound`, `image_index`  |          |     ✓     |
 | Track coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
-| Team stack abstraction                  |           |     ✓     |
-| `form-team-stmt`                        |           |     ✓     |
-| `change-team-stmt`                      |           |     ✓     |
-| `end-team-stmt`                         |           |     ✓     |
-| Allocate a coarray                      |           |     ✓     |
-| Deallocate a coarray                    |           |     ✓     |
+| Allocate and deallocate a coarray       |           |     ✓     |
 | Reference a coindexed-object            |           |     ✓     |
+| Team stack abstraction                  |           |     ✓     |
+| `form-team-stmt`, `change-team-stmt`, `end-team-stmt` |           |     ✓     |
+| Atomic subroutines                      |           |     ✓     |
+| Synchronization statements              |           |     ✓     |
+| Events              |           |     ✓     |
+| Locks              |           |     ✓     |
+| `critical-construct`             |           |     ✓     |
+
 
 ## Types
 
@@ -76,7 +79,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
 
    [`coarray_handle`](#coarray_handle), [`coindices`](#coindices), [`target`](#target), [`value`](#value), [`team`](#team), [`team_number`](#team_number), [`stat`](#stat)
 
-## Procedures
+## Runtime Interface Procedures
 
    **Collectives:**
      [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum)
@@ -94,7 +97,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
      [`caf_async_wait_for`](#caf_aync_wait_for), [`caf_async_try_for`](#caf_async_try_for), [`caf_sync_memory`](#caf_sync_memory)
 
    **Image Synchronization:**
-     [`caf_sync_all`](#caf_sync_all), [`caf_sync_images`](#caf_sync_images), [`caf_lock`](#caf_lock), [`caf_unlock`](#caf_unlock), [`caf_critical`](#caf_critical)
+     [`caf_sync_all`](#caf_sync_all), [`caf_sync_images`](#caf_sync_images), [`caf_lock`](#caf_lock), [`caf_unlock`](#caf_unlock), [`caf_critical`](#caf_critical), [`caf_end_critical`](#caf_end_critical)
 
    **Events:**
      [`caf_event_post`](#caf_event_post), [`caf_event_wait`](#caf_event_wait), [`caf_event_query`](#caf_event_query)
@@ -384,6 +387,11 @@ The following table outlines which tasks will be the responsibility of the Fortr
   * **Arguments**:
 
  #### `caf_critical`
+  * **Description**:
+  * **Procedure Interface**:
+  * **Arguments**:
+
+#### `caf_end_critical`
   * **Description**:
   * **Procedure Interface**:
   * **Arguments**:
