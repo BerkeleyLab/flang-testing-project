@@ -62,6 +62,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
 | Reference a coindexed-object            |           |     ✓     |
 | Team stack abstraction                  |           |     ✓     |
 | `form-team-stmt`, `change-team-stmt`, `end-team-stmt` |           |     ✓     |
+| Intrinsic functions related to Coarray Fortran, like `num_images`, etc |           |     ✓     |
 | Atomic subroutines                      |           |     ✓     |
 | Synchronization statements              |           |     ✓     |
 | Events              |           |     ✓     |
