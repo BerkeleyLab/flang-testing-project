@@ -57,6 +57,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
 | Assigning variables of type `team-type` |     ✓     |           |
 | Track locals coarrays for implicit deallocation when exiting a scope |     ✓     |           |
 | Initialize a coarray with SOURCE= as part of allocate-stmt |     ✓     |           |
+| `caf_critical_id_t` |     ✓     |           |
 | Track coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
 | Allocate and deallocate a coarray       |           |     ✓     |
 | Reference a coindexed-object            |           |     ✓     |
@@ -64,6 +65,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
 | `form-team-stmt`, `change-team-stmt`, `end-team-stmt` |           |     ✓     |
 | Intrinsic functions related to Coarray Fortran, like `num_images`, etc |           |     ✓     |
 | Atomic subroutines                      |           |     ✓     |
+| Collective subroutines                      |           |     ✓     |
 | Synchronization statements              |           |     ✓     |
 | Events              |           |     ✓     |
 | Locks              |           |     ✓     |
@@ -123,7 +125,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
 ## Types Descriptions
 
  ### Fortran Intrinsic Derived types
-   These types will be defined in the runtime library and it is proposed that the compiler will use a rename to use the runtime library definitions for these types in the compiler's implementation of the `ISO_Fortran_Env` module.
+   These types will be defined in the runtime library and it is proposed that the compiler will use a rename to use the runtime library definitions for these types in the compiler's implementation of the `ISO_Fortran_Env` module. REMOVE_NOTE_TODO: add rationale for this
 
  #### `caf_team_type`
    * implementation for `team_type` from `ISO_Fortran_Env`
@@ -133,17 +135,18 @@ The following table outlines which tasks will be the responsibility of the Fortr
    * implementation for `lock_type` from `ISO_Fortran_Env`
 
 
---------------------------------------------------------------------
-
-
  ### Runtime library specific types
+   REMOVE_NOTE_TODO:    ADD general description of types
 
  #### `caf_co_handle_t`
    * `caf_co_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler.
  #### `caf_async_handle_t`
    * `caf_async_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler. This type will help the runtime library track and provide asynchrony.
- #### `caf_source_loc_t`
-   * `caf_source_loc_t` will be used to track the location of the critical construct blocks. The runtime library will handle critical constructs, and not expect the compiler to rewrite them as blocks with lock and unlock statements. This would be burdensome on the compiler because a lock_type variable would need to be declared, but as it needs to be a coarray, it would have to hoist its (REMOVE_NOTE: reword?!?!) declaration. REMOVE_NOTE_TODO_DECISION: The compiler will control the implementation of the type and pass it off to the runtime library OR The runtime library will control the implementation of the type and receive the required information from the compiler to create the needed instances of the type.
+ #### `caf_critical_id_t`
+   * `caf_critical_id_t` will be used to track the location of the critical construct blocks. REMOVE_NOTE_TODO: this type should be a int which is a unique identifier , (may not need to be a derived type)
+
+need to have a state saying whether we are in a critical construct or not, if we are in one, then we can ignore any further nested critical constructs.
+
 
 
 ## Common arguments' descriptions
@@ -183,7 +186,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
  #### `stat`
   * Argument for [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum), [`caf_put`](#caf_put), [`caf_get`](#caf_get)
   * scalar of type `integer`
-  * if no error condition occurs on that image, it is assigned the value `0` (REMOVE_NOTE: ?)
+  * if no error condition occurs on that image, it is assigned the value `0`
 
 ## Procedure descriptions
 
@@ -219,12 +222,12 @@ The following table outlines which tasks will be the responsibility of the Fortr
   When the compiler identifies a program that uses "Coarray Fortran" features, it will insert calls to `caf_init` and `caf_finalize`. These procedures ...
 
  #### `caf_init`
-  * **Description**: (REMOVE_NOTE: should it be caf_caffeinate?)
+  * **Description**:
   * **Procedure Interface**: `function caf_init() result(exit_code)`
   * **Result**: `exit_code` is an `integer` whose value ...
 
  #### `caf_finalize`
-  * **Description**: (REMOVE_NOTE: should it be caf_decaffeinate?)
+  * **Description**:
   * **Procedure Interface**: `subroutine caf_finalize(exit_code)`
   * **Arguments**: `exit_code` is `intent(in)` and ...
 
@@ -247,24 +250,32 @@ The following table outlines which tasks will be the responsibility of the Fortr
 
  #### `caf_allocate`
   * **Description**: Calls to `caf_allocate` will be inserted when the compiler wants to allocate a coarray or when there is a statically declared coarray. This procedure allocates memory for a coarray. The `coarray_handle` dummy argument will pass back a handle that the runtime library will have created to be used for all future accesses and deallocation of the associated coarray. The `lbounds` and `sizes` arguments must 1d arrays with the same dimensions.
+  The `co_lbounds` and `co_sizes` arguments must be 1d arrays with the same dimensions. The product of the difference of the co_lbounds and co_ubounds need to equal the number of team members. `local_slice` shall not be allocated on entry
+
+   NOTE: the runtime library will stash away the coshape information at this time, runtime will have a mapping between the co_handle_t and the coshape information.
+   NOTE: considering adding a mold argument that would allow for dynamic typing for local_slice
   * **Procedure Interface**:
   ```
-    module subroutine caf_allocate(lbounds, sizes, coarray_handle, local_slice)
+    module subroutine caf_allocate(co_lbounds, co_ubounds, lbounds, ubounds, coarray_handle, local_slice)
       implicit none
-      type(caf_co_handle_t), intent(out) :: coarray_handle
-      type(*), dimension(..), intent(inout) :: local_slice
-      integer, dimension(:), intent(in) :: lbounds, sizes
+      integer, kind(c_intmax_t), dimension(:), intent(in) :: co_lbounds, co_ubounds REMOVE_NOTE_TODO: (move these fake comments into descriptions of the arguments)! information about the coshape of the coarray being allocated
+      integer, kind(c_intmax_t), dimension(:), intent(in) :: lbounds, ubounds  ! information about the shape of the local_slice (non_coindexed object)
+      type(caf_co_handle_t), intent(out) :: coarray_handle ! represents the distributed object of the coarray on the corresponding team
+      type(*), dimension(..), allocatable, intent(out) :: local_slice
     end subroutine
   ```
-  REMOVE_NOTE: Fix pseudo code
 
  #### `caf_deallocate`
-  * **Description**: This procedure
+  * **Description**: This procedure. Has side effect that the allocatable local_slices represented by the coarray_handles will be destroyed. Compiler needs to know by association which local_slices are being deallocated.
+  if there is a local coarray that doesn't have the save attribute, enter a subroutine that
+
+when exiting a local scope where implicit deallocation of a coarray occurs, compiler must call this
+and when a deallocate stmt of a coarray occurs, compiler must call this
   * **Procedure Interface**:
   ```
     module subroutine caf_deallocate(coarray_handles)
       implicit none
-      type(caf_co_handle_t), dimension(:), intent(out) :: coarray_handles (REMOVE_NOTE: is coarray_handles supposed to be `intent(out)`?)
+      type(caf_co_handle_t), dimension(:), intent(in) :: coarray_handles
     end subroutine
   ```
 
@@ -289,17 +300,6 @@ The following table outlines which tasks will be the responsibility of the Fortr
   ```
   * **Notes**: Both optional arguments `team` and `team_number` shall not be present in the same call
 
-
- #### `caf_end_segment`
-(REMOVE_NOTE): Is this procedure going to be visible to the compiler? If not, do we include discussions of it here?
-  * **Description**: This procedure ends a segment. Any puts that are still in flight will be committed (and any caches will be thrown away REMOVE_NOTE_TODO_DECISION: if we decide to do caches). Calls to this procedure will be side effects of invocations of the image control statements. It is not a synchronizing operation.
-  * **Procedure Interface**:
-  ```
-    module subroutine caf_end_segment()
-      implicit none
-      (REMOVE_NOTE: are there no arguments? or is it just that we haven't sketched out the args yet?)
-    end subroutine
-  ```
 
  #### `caf_get`
   * **Description**:
@@ -578,6 +578,11 @@ All atomic operations are blocking operations.
 
 
 ## Berkeley Lab internal Notes: (REMOVE_NOTES before submission)
+  - REMOVE_NOTE_TODO_DECISION: Need to decide the thread semantics
+  - REMOVE_NOTE_TODO_DECISION: Are we going to have Caffeine be thread safe? Have a thread safety option? Is it a build time option? or runtime?
+        Dan advocates having a thread-safety option that is build time.
+  - Do we need to add any discussion of what it would look like when code has mixed OpenMP and Coarray Fortran?
+
 
   - Search for REMOVE_NOTE_TODO_DECISION to find locations where specific decisions/options are outlined, but not yet made.
   - Search for, resolve, and remove all REMOVE_NOTE and REMOVE_NOTE_TODO_DECISIONS before finalizing this document.
@@ -589,8 +594,23 @@ All atomic operations are blocking operations.
 
 
 
+POTENTIAL RATIONALE TO PRESENT SOMEWHERE maybe
+The runtime library will handle critical constructs, and not expect the compiler to rewrite them as blocks with lock and unlock statements. This would be burdensome on the compiler because a lock_type variable would need to be declared, but as it needs to be a coarray, it would have to hoist its (REMOVE_NOTE: reword?!?!) declaration.
+
 Same non-blocking semantics (has to be started and finished in the same segment) will likely apply to collectives, use caf_wait_for, caf_try_for, etc
 Should change team and critical be non-blocking? sync-all?)
+
+
+Caffeine internal procedure, so not part of the CAF PRI.
+ #### `caf_end_segment`
+  * **Description**: This procedure ends a segment. Any puts that are still in flight will be committed (and any caches will be thrown away REMOVE_NOTE_TODO_DECISION: if we decide to do caches). Calls to this procedure will be side effects of invocations of the image control statements. It is not a synchronizing operation.
+  * **Procedure Interface**:
+  ```
+    module subroutine caf_end_segment()
+      implicit none
+      (REMOVE_NOTE: are there no arguments? or is it just that we haven't sketched out the args yet?)
+    end subroutine
+  ```
 
 
 
@@ -619,6 +639,25 @@ REMOVE_NOTEs:
   * In `caf_get_async`, the `value` arg may need asynchronous attribute or may be implicitly asynchronous
 
 
+REMOVE_NOTE_
+
+examples where if a user writes this example code, then the compiler should rewrite it to look like this other piece of example code
+
+
+TODO after writing example, try compiling it and see if it compiles at least until breaking at linking because no def for caf_allocate etc
+1. basic caf example
+    - static coarray declaration
+         - transform by adding caf_allocate and caf_deallocate calls
+    - write to coarrays
+    - read from coarrays
+    - sync-all-stmt (?)
+
+2. allocatable coarray example
+    - allocatable coarray with an initializer
+    - compiler transforms code and adds assignment statement after calls to caf_allocate
+
+3. implicit deallocation of a coarray example
+    - local, allocatable coarray -> compiler must insert caf_deallocate call
 
 flexible array member in c
 
