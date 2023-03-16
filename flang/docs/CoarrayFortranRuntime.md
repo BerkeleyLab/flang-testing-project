@@ -78,10 +78,6 @@ The following table outlines which tasks will be the responsibility of the Fortr
 
  **Runtime library specific types:** [`caf_co_handle_t`](#caf_co_handle_t), [`caf_async_handle_t`](#caf_async_handle_t), [`caf_source_loc_t`](#caf_source_loc_t)
 
-## Common arguments
-
-   [`coarray_handle`](#coarray_handle), [`coindices`](#coindices), [`target`](#target), [`value`](#value), [`team`](#team), [`team_number`](#team_number), [`stat`](#stat)
-
 ## Runtime Interface Procedures
 
    **Collectives:**
@@ -151,29 +147,13 @@ need to have a state saying whether we are in a critical construct or not, if we
 
 ## Common arguments' descriptions
 
- #### `coarray_handle`
-   * Argument for [`caf_allocate`](#caf_allocate), [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async) and all of the [atomic operations](#atomic-memory-operation)
-   * scalar of type [`caf_co_handle_t`](#caf_co_handle_t)
-   * This argument is a handle for the established coarray. The handle will be created when the coarray is established.
- #### `coarray_handles`
-   * array of type [`caf_co_handle_t`](#caf_co_handle_t)
- #### `async_handle`
-   * Argument for [`caf_get_async`](#caf_get_async), [`caf_async_wait_for`](#caf_async_wait_for), [`caf_async_try_for`](#caf_async_try_for)
-   * scalar of type [`caf_async_handle_t`](#caf_async_handle_t)
-   * This argument is
+REMOVE_NOTE_TODO: finish moving these down below in the procedure description area
+
  #### `finished`
    * Argument for [`caf_async_try_for`](#caf_async_try_for)
    * scalar of type [`caf_async_handle_t`](#caf_async_handle_t)
    * This argument is
- #### `coindices`
-   * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
-   * 1d assumed-shape array of type `integer`
- #### `target`
-   * assumed-rank array of `type(*)`
-   * (REMOVE_NOTE: Is this note true for the puts and gets? And not just the atomics?) The location of this argument is the relevant information, not its value. This means that the compiler needs to ensure that when codegen (REMOVE_NOTE: ?) occurs, this argument is pass by reference and there is no copy made. The location of `target` is needed to compute the offset when the atomic operations' `atom` dummy argument is part of a derived type.
- #### `value`
-   * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
-   * assumed-rank array of `type(*)`
+
  #### `source`
    * Argument for [`caf_get_async`](#caf_get_async)
    * assumed-rank array of `type(*)`
@@ -183,53 +163,133 @@ need to have a state saying whether we are in a critical construct or not, if we
  #### `team_number`
    * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get)
    * scalar of type `integer`
- #### `stat`
-  * Argument for [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum), [`caf_put`](#caf_put), [`caf_get`](#caf_get)
-  * scalar of type `integer`
-  * if no error condition occurs on that image, it is assigned the value `0`
 
 ## Procedure descriptions
 
 ### Collectives
 
+ #### Common arguments
+  * **`a`**
+    * Argument for all the collective subroutines: [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum),
+    * may be any type
+    * is always `intent(inout)`
+    * for [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum) it is assigned the value computed by the collective operation, if no error conditions occurs and if `result_image` is absent, or the executing image is the one identified by `result_image`, otherwise `a` becomes undefined
+    * for [`co_broadcast`](#co_broadcast), the value of the argument on the `source_image` is assigned to the `a` argument on all other images
+
+  * **`stat`**
+    * Argument for all the collective subroutines: [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum),
+    * is always of type `integer`
+    * is always `intent(out)`
+    * is assigned the value `0` when the execution of the procedure is succcessful
+    * is assigned a positive value when the execution of the procedure is not succcessful and the `a` argument becomes undefined
+
+  * **`errmsg`**
+    * Argument for all the collective subroutines: [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum),
+    * is always of type `integer`
+    * is always `intent(inout)`
+    * if an error condition does not occur, the value is unchanged
+    * if an error condition occurs, an explanatory message is assigned to the argument
+
+
+  (REMOVE_NOTE_TODO: check the interfaces for these collectives, currently are same as the procedures in Caffeine, but these interfaces have not yet been discussed and decided upon for the Coarray Fortran Parallel Runtime Library Interface. May need to add something?)
+
  #### `caf_co_broadcast`
   * **Description**:
   * **Procedure Interface**:
+  ```
+     subroutine caf_co_broadcast(a, source_image, stat, errmsg)
+       implicit none
+       type(*), intent(inout), contiguous, target :: a(..)
+       integer, optional, intent(in) :: source_image
+       integer, optional, intent(out), target :: stat
+       character(len=*), intent(inout), optional, target :: errmsg
+     end subroutine
+  ```
   * **Arguments**: [`stat`](#stat)
 
  #### `caf_co_max`
   * **Description**:
   * **Procedure Interface**:
+  ```
+     subroutine caf_co_max(a, result_image, stat, errmsg)
+       implicit none
+       type(*), intent(inout), contiguous, target :: a(..)
+       integer, intent(in), optional, target :: result_image
+       integer, intent(out), optional, target :: stat
+       character(len=*), intent(inout), optional, target :: errmsg
+     end subroutine
+  ```
   * **Arguments**: [`stat`](#stat)
 
  #### `caf_co_min`
   * **Description**:
   * **Procedure Interface**:
+  ```
+     subroutine caf_co_min(a, result_image, stat, errmsg)
+       implicit none
+       type(*), intent(inout), contiguous, target :: a(..)
+       integer, intent(in), optional, target :: result_image
+       integer, intent(out), optional, target :: stat
+       character(len=*), intent(inout), optional, target :: errmsg
+     end subroutine
+  ```
   * **Arguments**: [`stat`](#stat)
 
  #### `caf_co_reduce`
   * **Description**:
   * **Procedure Interface**:
+  ```
+     subroutine caf_co_reduce(a, operation, result_image, stat, errmsg)
+       implicit none
+       type(*), intent(inout), contiguous, target :: a(..)
+       type(c_funptr), value :: operation
+       integer, intent(in), optional, target :: result_image
+       integer, intent(out), optional, target :: stat
+       character(len=*), intent(inout), optional, target :: errmsg
+     end subroutine
+  ```
   * **Arguments**: [`stat`](#stat)
 
  #### `caf_co_sum`
   * **Description**:
   * **Procedure Interface**:
+  ```
+     subroutine caf_co_sum(a, result_image, stat, errmsg)
+       implicit none
+       type(*), intent(inout), contiguous, target :: a(..)
+       integer, intent(in), target, optional :: result_image
+       integer, intent(out), target, optional :: stat
+       character(len=*), intent(inout), target, optional :: errmsg
+     end subroutine
+  ```
   * **Arguments**: [`stat`](#stat)
 
 ### Program startup and shutdown
 
-  When the compiler identifies a program that uses "Coarray Fortran" features, it will insert calls to `caf_init` and `caf_finalize`. These procedures ...
+  When the compiler identifies a program that uses "Coarray Fortran" features, it will insert calls to `caf_init` and `caf_finalize`. These procedures will intalize and terminate the Coarray Fortran environment.
 
  #### `caf_init`
-  * **Description**:
-  * **Procedure Interface**: `function caf_init() result(exit_code)`
-  * **Result**: `exit_code` is an `integer` whose value ...
+  * **Description**: This procedure will initialize the Coarray Fortran environment.
+  * **Procedure Interface**:
+    ```
+      function caf_init() result(exit_code)
+        implicit none
+        integer :: exit_code
+      end function
+    ```
+  * **Result**: `exit_code` is an `integer` whose value ... (REMOVE_NOTE_TODO: fill in)
 
  #### `caf_finalize`
-  * **Description**:
-  * **Procedure Interface**: `subroutine caf_finalize(exit_code)`
-  * **Arguments**: `exit_code` is `intent(in)` and ...
+  * **Description**: This procedure will terminate the Coarray Fortran environment.
+  * **Procedure Interface**:
+    ```
+      subroutine caf_finalize(exit_code)
+        implicit none
+        integer, intent(in) :: exit_code
+      end subroutine
+    ```
+  * **Arguments**:
+    * **`exit_code`**: is .. (REMOVE_NOTE_TODO: fill in)
 
  #### `caf_error_stop`
   * **Description**:
@@ -249,46 +309,60 @@ need to have a state saying whether we are in a critical construct or not, if we
 ### Allocation and deallocation
 
  #### `caf_allocate`
-  * **Description**: Calls to `caf_allocate` will be inserted when the compiler wants to allocate a coarray or when there is a statically declared coarray. This procedure allocates memory for a coarray. The `coarray_handle` dummy argument will pass back a handle that the runtime library will have created to be used for all future accesses and deallocation of the associated coarray. The `lbounds` and `sizes` arguments must 1d arrays with the same dimensions.
-  The `co_lbounds` and `co_sizes` arguments must be 1d arrays with the same dimensions. The product of the difference of the co_lbounds and co_ubounds need to equal the number of team members. `local_slice` shall not be allocated on entry
-
-   NOTE: the runtime library will stash away the coshape information at this time, runtime will have a mapping between the co_handle_t and the coshape information.
-   NOTE: considering adding a mold argument that would allow for dynamic typing for local_slice
+  * **Description**: This procedure allocates memory for a coarray. Calls to `caf_allocate` will be inserted by the compiler when there is an explicit coarray allocation or a statically declared coarray in the source code. The runtime library will stash away the coshape information at this time in order to internally track it during the lifetime of the coarray.
   * **Procedure Interface**:
   ```
-    module subroutine caf_allocate(co_lbounds, co_ubounds, lbounds, ubounds, coarray_handle, local_slice)
+    subroutine caf_allocate(co_lbounds, co_ubounds, lbounds, ubounds, coarray_handle, local_slice)
       implicit none
-      integer, kind(c_intmax_t), dimension(:), intent(in) :: co_lbounds, co_ubounds REMOVE_NOTE_TODO: (move these fake comments into descriptions of the arguments)! information about the coshape of the coarray being allocated
-      integer, kind(c_intmax_t), dimension(:), intent(in) :: lbounds, ubounds  ! information about the shape of the local_slice (non_coindexed object)
-      type(caf_co_handle_t), intent(out) :: coarray_handle ! represents the distributed object of the coarray on the corresponding team
+      integer, kind(c_intmax_t), dimension(:), intent(in) :: co_lbounds, co_ubounds
+      integer, kind(c_intmax_t), dimension(:), intent(in) :: lbounds, ubounds
+      type(caf_co_handle_t), intent(out) :: coarray_handle
       type(*), dimension(..), allocatable, intent(out) :: local_slice
     end subroutine
   ```
+  * **Further argument descriptions**:
+    * **`co_lbounds` and `co_ubounds`**: Shall be the the lower and upper bounds of the coarray being allocated. Shall be 1d arrays with the same dimensions as each other. The product of the difference of the `co_lbounds` and `co_ubounds` shall equal the number of team members (REMOVE_NOTE_TODO: check wording).
+    * **`lbounds` and `ubounds`**: Shall be the the lower and upper bounds of the `local_slice`. Shall be 1d arrays with the same dimensions as each other.
+    * **`coarray_handle`**: Represents the distributed object of the coarray on the corresponding team. Shall return the handle created by the runtime library that the compiler shall use for future coindexed-object references of the associated coarray and for deallocation of the associated coarray.
+    * **`local_slice`**: Shall not be allocated on entry. Shall return the
 
  #### `caf_deallocate`
-  * **Description**: This procedure. Has side effect that the allocatable local_slices represented by the coarray_handles will be destroyed. Compiler needs to know by association which local_slices are being deallocated.
-  if there is a local coarray that doesn't have the save attribute, enter a subroutine that
-
-when exiting a local scope where implicit deallocation of a coarray occurs, compiler must call this
-and when a deallocate stmt of a coarray occurs, compiler must call this
+  * **Description**: This procedure releases memory previously allocated for all of the coarrays associated with the handles in `coarray_handles`, resulting in the destruction of any associated `local_slices` received by the compiler after `caf_allocate` calls.  (REMOVE_NOTE_TODO: reword) The compiler will insert calls to this procedure when exiting a local scope where implicit deallocation of a coarray is mandated by the standard and when a coarray is explicitly deallocated through a `deallocate-stmt` in the source code.
   * **Procedure Interface**:
   ```
-    module subroutine caf_deallocate(coarray_handles)
+    subroutine caf_deallocate(coarray_handles)
       implicit none
       type(caf_co_handle_t), dimension(:), intent(in) :: coarray_handles
     end subroutine
   ```
+  * **Argument descriptions**:
+    * **`coarray_handles`**: Is an array of all of the handles for the coarrays that shall be deallocated.
+
 
 ### Coarray Access
 
  Coarray accesses will maintain serial dependencies for the issuing image. A non-blocking get has to be started and finished in the same segment. The interface provides puts that are fence-based and gets that are split phased.
 
+ #### Common arguments
+  * **`coarray_handle`**
+    * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
+    * scalar of type [`caf_co_handle_t`](#caf_co_handle_t)
+    * is a handle for the established coarray
+    * represents the distributed object of the coarray on the corresponding team
+  * **`coindices`**
+    * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
+    * 1d assumed-shape array of type `integer`
+    * (REMOVE_NOTE_TODO: fill in)
+  * **`value`**
+    * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
+    * assumed-rank array of `type(*)`
+    * is
 
  #### `caf_put`
-  * **Description**: Blocks on local completion. (REMOVE_NOTE: eventually would like a caf_put that doesn't block on local completion).
+  * **Description**: This procedure assigns to a coarray. The compiler shall call this procedure when there is a coarray reference that is a `coindexed-object`. The compiler shall not (REMOVE_NOTE: need to?) call this procedure when the coarray reference is not a `coindexed-object`. This procedure blocks on local completion. (REMOVE_NOTE: eventually would like a caf_put that doesn't block on local completion).
   * **Procedure Interface**:
   ```
-    module subroutine caf_put(coarray_handle, coindices, team, team_number, target, value, stat)
+    subroutine caf_put(coarray_handle, coindices, team, team_number, target, value, stat)
       implicit none
       type(caf_co_handle_t), intent(in) :: coarray_handle
       integer, intent(in) :: coindices(:)
@@ -298,14 +372,16 @@ and when a deallocate stmt of a coarray occurs, compiler must call this
       integer, optional, intent(out) :: stat
     end subroutine
   ```
-  * **Notes**: Both optional arguments `team` and `team_number` shall not be present in the same call
+  * **Further argument descriptions**:
+    * **`team` and `team_number`**: optional arguments that specify a team. They shall not both be present in the same call.
+    * **`value`**: The value that shall be assigned to (REMOVE_NOTE_TODO: fill in)
 
 
  #### `caf_get`
   * **Description**:
   * **Procedure Interface**:
   ```
-    module subroutine caf_get(coarray_handle, coindices, team, team_number, source, value, stat)
+    subroutine caf_get(coarray_handle, coindices, team, team_number, source, value, stat)
       implicit none
       type(caf_co_handle_t), intent(in) :: coarray_handle
       integer, intent(in) :: coindices(:)
@@ -322,7 +398,7 @@ and when a deallocate stmt of a coarray occurs, compiler must call this
   * **Description**:
   * **Procedure Interface**:
   ```
-    module subroutine caf_get_async(coarray_handle, coindices, team, team_number, source, value, stat, async_handle)
+    subroutine caf_get_async(coarray_handle, coindices, team, team_number, source, value, stat, async_handle)
       implicit none
       type(caf_co_handle_t),  intent(in) :: coarray_handle
       integer, dimension(:),  intent(in) :: coindices
@@ -338,11 +414,19 @@ and when a deallocate stmt of a coarray occurs, compiler must call this
 
 ###  Operation Synchronization
 
+
+ #### Common arguments
+  * **`async_handle`**
+    * Argument for [`caf_async_wait_for`](#caf_async_wait_for), [`caf_async_try_for`](#caf_async_try_for)
+    * scalar of type [`caf_async_handle_t`](#caf_async_handle_t)
+    * This argument is a handle used to track the asynchronous operation REMOVE_NOTE_TODO: reword and buff out this sentence
+
+
  #### `caf_async_wait_for`
   * **Description**: This procedure waits until (REMOVE_NOTE: asynchronous?) operation is complete and then consumes the async handle
   * **Procedure Interface**:
   ```
-    module subroutine caf_async_wait_for(async_handle)
+    subroutine caf_async_wait_for(async_handle)
       implicit none
       type(caf_async_handle_t), intent(inout) :: async_handle
     end subroutine
@@ -352,7 +436,7 @@ and when a deallocate stmt of a coarray occurs, compiler must call this
   * **Description**: This procedure consumes the async handle if and only if the operation is complete
   * **Procedure Interface**:
   ```
-    module subroutine caf_async_try_for(async_handle, finished)
+    subroutine caf_async_try_for(async_handle, finished)
       implicit none
       type(caf_async_handle_t), intent(inout) :: async_handle
       logical, intent(out) :: finished
@@ -450,12 +534,19 @@ and when a deallocate stmt of a coarray occurs, compiler must call this
 
 All atomic operations are blocking operations.
 
+ #### Common arguments
+  * **`target`**
+    * Argument for all of the atomics (REMOVE_NOTE_TODO_DECISION: have we decided to deal with atomics with the offset option or the target option?)
+    * assumed-rank array of `type(*)`
+    * The location of this argument is the relevant information, not its value. As such, the compiler needs to ensure that when codegen (REMOVE_NOTE: ?) occurs, this argument is pass by reference and there is no copy made. The location of `target` is needed to compute the offset when the atomic operations' `atom` dummy argument is part of a derived type.
+
+
  #### `caf_atomic_add`
   * **Description**:
   * **Procedure Interface**: REMOVE_NOTE_TODO_DECISION:
   Option 1 with offset:
   ```
-    module subroutine caf_atomic_add(coarray_handle, coindicies, offset, value, stat)
+    subroutine caf_atomic_add(coarray_handle, coindicies, offset, value, stat)
       type(caf_co_handle_t) :: coarray_handle
       integer, intent(in) :: coindices(:)
       integer :: offset, value, stat
@@ -464,7 +555,7 @@ All atomic operations are blocking operations.
 
   Option 2 with target:
   ```
-    module subroutine caf_atomic_add(coarray_handle, coindicies, target, value, stat)
+    subroutine caf_atomic_add(coarray_handle, coindicies, target, value, stat)
       type(caf_co_handle_t) :: coarray_handle
       integer, intent(in) :: coindices(:) ! names image num
       integer(kind=atomic_int_kind), intent(in) :: target !location of target is relevant, not the value of target, need this to compute the offset when the `atom` dummy argument to the intrinsic is part of a derived type
@@ -587,6 +678,9 @@ All atomic operations are blocking operations.
   - Search for REMOVE_NOTE_TODO_DECISION to find locations where specific decisions/options are outlined, but not yet made.
   - Search for, resolve, and remove all REMOVE_NOTE and REMOVE_NOTE_TODO_DECISIONS before finalizing this document.
 
+  - `caf_allocate` - after getting the basic necessities for this procedure sorted, considering adding a mold argument that would allow for dynamic typing for `local_slice`
+
+
   * **Asynchrony:**
     -   Could be handle based or fence based approaches
     -   Handle based - return can individual operation handle, later on compiler synchronizes handle
@@ -606,7 +700,7 @@ Caffeine internal procedure, so not part of the CAF PRI.
   * **Description**: This procedure ends a segment. Any puts that are still in flight will be committed (and any caches will be thrown away REMOVE_NOTE_TODO_DECISION: if we decide to do caches). Calls to this procedure will be side effects of invocations of the image control statements. It is not a synchronizing operation.
   * **Procedure Interface**:
   ```
-    module subroutine caf_end_segment()
+    subroutine caf_end_segment()
       implicit none
       (REMOVE_NOTE: are there no arguments? or is it just that we haven't sketched out the args yet?)
     end subroutine
@@ -658,6 +752,7 @@ TODO after writing example, try compiling it and see if it compiles at least unt
 
 3. implicit deallocation of a coarray example
     - local, allocatable coarray -> compiler must insert caf_deallocate call
+    - have multiple coarrays, with only one call to caf_deallocate since it takes an array of handles
 
 flexible array member in c
 
