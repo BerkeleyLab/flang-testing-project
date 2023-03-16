@@ -57,7 +57,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
 | Assigning variables of type `team-type` |     ✓     |           |
 | Track locals coarrays for implicit deallocation when exiting a scope |     ✓     |           |
 | Initialize a coarray with SOURCE= as part of allocate-stmt |     ✓     |           |
-| `caf_critical_id_t` |     ✓     |           |
+| Provide unique identifiers for location of each `critical-construct` |     ✓     |           |
 | Track coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
 | Allocate and deallocate a coarray       |           |     ✓     |
 | Reference a coindexed-object            |           |     ✓     |
@@ -138,31 +138,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
    * `caf_co_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler.
  #### `caf_async_handle_t`
    * `caf_async_handle_t` will be a derived type provided by the runtime library and that will be opaque to the compiler. This type will help the runtime library track and provide asynchrony.
- #### `caf_critical_id_t`
-   * `caf_critical_id_t` will be used to track the location of the critical construct blocks. REMOVE_NOTE_TODO: this type should be a int which is a unique identifier , (may not need to be a derived type)
 
-need to have a state saying whether we are in a critical construct or not, if we are in one, then we can ignore any further nested critical constructs.
-
-
-
-## Common arguments' descriptions
-
-REMOVE_NOTE_TODO: finish moving these down below in the procedure description area
-
- #### `finished`
-   * Argument for [`caf_async_try_for`](#caf_async_try_for)
-   * scalar of type [`caf_async_handle_t`](#caf_async_handle_t)
-   * This argument is
-
- #### `source`
-   * Argument for [`caf_get_async`](#caf_get_async)
-   * assumed-rank array of `type(*)`
- #### `team`
-   * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get)
-   * scalar of type `team_type`
- #### `team_number`
-   * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get)
-   * scalar of type `integer`
 
 ## Procedure descriptions
 
@@ -196,77 +172,77 @@ REMOVE_NOTE_TODO: finish moving these down below in the procedure description ar
  #### `caf_co_broadcast`
   * **Description**:
   * **Procedure Interface**:
-  ```
-     subroutine caf_co_broadcast(a, source_image, stat, errmsg)
-       implicit none
-       type(*), intent(inout), contiguous, target :: a(..)
-       integer, optional, intent(in) :: source_image
-       integer, optional, intent(out), target :: stat
-       character(len=*), intent(inout), optional, target :: errmsg
-     end subroutine
-  ```
-  * **Arguments**: [`stat`](#stat)
+    ```
+       subroutine caf_co_broadcast(a, source_image, stat, errmsg)
+         implicit none
+         type(*), intent(inout), contiguous, target :: a(..)
+         integer, optional, intent(in) :: source_image
+         integer, optional, intent(out), target :: stat
+         character(len=*), intent(inout), optional, target :: errmsg
+       end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_co_max`
   * **Description**:
   * **Procedure Interface**:
-  ```
-     subroutine caf_co_max(a, result_image, stat, errmsg)
-       implicit none
-       type(*), intent(inout), contiguous, target :: a(..)
-       integer, intent(in), optional, target :: result_image
-       integer, intent(out), optional, target :: stat
-       character(len=*), intent(inout), optional, target :: errmsg
-     end subroutine
-  ```
-  * **Arguments**: [`stat`](#stat)
+    ```
+       subroutine caf_co_max(a, result_image, stat, errmsg)
+         implicit none
+         type(*), intent(inout), contiguous, target :: a(..)
+         integer, intent(in), optional, target :: result_image
+         integer, intent(out), optional, target :: stat
+         character(len=*), intent(inout), optional, target :: errmsg
+       end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_co_min`
   * **Description**:
   * **Procedure Interface**:
-  ```
-     subroutine caf_co_min(a, result_image, stat, errmsg)
-       implicit none
-       type(*), intent(inout), contiguous, target :: a(..)
-       integer, intent(in), optional, target :: result_image
-       integer, intent(out), optional, target :: stat
-       character(len=*), intent(inout), optional, target :: errmsg
-     end subroutine
-  ```
-  * **Arguments**: [`stat`](#stat)
+    ```
+       subroutine caf_co_min(a, result_image, stat, errmsg)
+         implicit none
+         type(*), intent(inout), contiguous, target :: a(..)
+         integer, intent(in), optional, target :: result_image
+         integer, intent(out), optional, target :: stat
+         character(len=*), intent(inout), optional, target :: errmsg
+       end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_co_reduce`
   * **Description**:
   * **Procedure Interface**:
-  ```
-     subroutine caf_co_reduce(a, operation, result_image, stat, errmsg)
-       implicit none
-       type(*), intent(inout), contiguous, target :: a(..)
-       type(c_funptr), value :: operation
-       integer, intent(in), optional, target :: result_image
-       integer, intent(out), optional, target :: stat
-       character(len=*), intent(inout), optional, target :: errmsg
-     end subroutine
-  ```
-  * **Arguments**: [`stat`](#stat)
+    ```
+       subroutine caf_co_reduce(a, operation, result_image, stat, errmsg)
+         implicit none
+         type(*), intent(inout), contiguous, target :: a(..)
+         type(c_funptr), value :: operation
+         integer, intent(in), optional, target :: result_image
+         integer, intent(out), optional, target :: stat
+         character(len=*), intent(inout), optional, target :: errmsg
+       end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_co_sum`
   * **Description**:
   * **Procedure Interface**:
-  ```
-     subroutine caf_co_sum(a, result_image, stat, errmsg)
-       implicit none
-       type(*), intent(inout), contiguous, target :: a(..)
-       integer, intent(in), target, optional :: result_image
-       integer, intent(out), target, optional :: stat
-       character(len=*), intent(inout), target, optional :: errmsg
-     end subroutine
-  ```
-  * **Arguments**: [`stat`](#stat)
+    ```
+       subroutine caf_co_sum(a, result_image, stat, errmsg)
+         implicit none
+         type(*), intent(inout), contiguous, target :: a(..)
+         integer, intent(in), target, optional :: result_image
+         integer, intent(out), target, optional :: stat
+         character(len=*), intent(inout), target, optional :: errmsg
+       end subroutine
+    ```
+  * **Further argument descriptions**:
 
 ### Program startup and shutdown
 
-  When the compiler identifies a program that uses "Coarray Fortran" features, it will insert calls to `caf_init` and `caf_finalize`. These procedures will intalize and terminate the Coarray Fortran environment.
+  When the compiler identifies a program that uses "Coarray Fortran" features, it will insert calls to `caf_init` and `caf_finalize`. These procedures will initialize and terminate the Coarray Fortran environment.
 
  #### `caf_init`
   * **Description**: This procedure will initialize the Coarray Fortran environment.
@@ -288,38 +264,60 @@ REMOVE_NOTE_TODO: finish moving these down below in the procedure description ar
         integer, intent(in) :: exit_code
       end subroutine
     ```
-  * **Arguments**:
+  * **Further argument descriptions**:
     * **`exit_code`**: is .. (REMOVE_NOTE_TODO: fill in)
 
+  (REMOVE_NOTE_TODO: check the interfaces for caf_error_stop and caf_stop, currently are same as the procedures in Caffeine, but these interfaces have not yet been discussed and decided upon for the Coarray Fortran Parallel Runtime Library Interface. May need to add something? Change something?)
+
  #### `caf_error_stop`
-  * **Description**:
-  * **Procedure Interface**:
-  * **Arguments**:
+  * **Description**: This procedure stops all images and provides the `stop_code` passed, or `0` if no `stop_code` is passed, as the process exit status
+  * **Procedure Interface**: REMOVE_NOTE_TODO_DECISION: should error_stop be implemented with two optional arguments with the precondition that they both shall not be passed at the same time? Or have overloaded procedures?
+    ```
+      subroutine caf_error_stop(stop_code_int, stop_code_char)
+        integer, intent(in), optional :: stop_code_int
+        character(len=*), intent(in), optional :: stop_code_char
+      end subroutine
+    ```
+  * **Further argument descriptions**:
+    * **`stop_code_int` and `stop_code_char`**: shall not both be present in the same call (if provide only one procedure instead of overloading caf_error_stop)
 
  #### `caf_stop`
-  * **Description**:
-  * **Procedure Interface**:
-  * **Arguments**:
+  * **Description**: This procedure synchronizes and stops the executing image. It provides the `stop_code` or `0` if no `stop_code` is passed, as the process exit status.
+  * **Procedure Interface**:  REMOVE_NOTE_TODO_DECISION: should stop be implemented with two optional arguments with the precondition that they both shall not be passed at the same time? Or have overloaded procedures?
+    ```
+      subroutine caf_stop(stop_code_int, stop_code_char)
+        implicit none
+        integer, intent(in) :: stop_code_int
+        character(len=*), intent(in) :: stop_code_char
+      end subroutine
+
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_fail_image`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_fail_image(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
 ### Allocation and deallocation
 
  #### `caf_allocate`
   * **Description**: This procedure allocates memory for a coarray. Calls to `caf_allocate` will be inserted by the compiler when there is an explicit coarray allocation or a statically declared coarray in the source code. The runtime library will stash away the coshape information at this time in order to internally track it during the lifetime of the coarray.
   * **Procedure Interface**:
-  ```
-    subroutine caf_allocate(co_lbounds, co_ubounds, lbounds, ubounds, coarray_handle, local_slice)
-      implicit none
-      integer, kind(c_intmax_t), dimension(:), intent(in) :: co_lbounds, co_ubounds
-      integer, kind(c_intmax_t), dimension(:), intent(in) :: lbounds, ubounds
-      type(caf_co_handle_t), intent(out) :: coarray_handle
-      type(*), dimension(..), allocatable, intent(out) :: local_slice
-    end subroutine
-  ```
+    ```
+      subroutine caf_allocate(co_lbounds, co_ubounds, lbounds, ubounds, coarray_handle, local_slice)
+        implicit none
+        integer, kind(c_intmax_t), dimension(:), intent(in) :: co_lbounds, co_ubounds
+        integer, kind(c_intmax_t), dimension(:), intent(in) :: lbounds, ubounds
+        type(caf_co_handle_t), intent(out) :: coarray_handle
+        type(*), dimension(..), allocatable, intent(out) :: local_slice
+      end subroutine
+    ```
   * **Further argument descriptions**:
     * **`co_lbounds` and `co_ubounds`**: Shall be the the lower and upper bounds of the coarray being allocated. Shall be 1d arrays with the same dimensions as each other. The product of the difference of the `co_lbounds` and `co_ubounds` shall equal the number of team members (REMOVE_NOTE_TODO: check wording).
     * **`lbounds` and `ubounds`**: Shall be the the lower and upper bounds of the `local_slice`. Shall be 1d arrays with the same dimensions as each other.
@@ -329,12 +327,12 @@ REMOVE_NOTE_TODO: finish moving these down below in the procedure description ar
  #### `caf_deallocate`
   * **Description**: This procedure releases memory previously allocated for all of the coarrays associated with the handles in `coarray_handles`, resulting in the destruction of any associated `local_slices` received by the compiler after `caf_allocate` calls.  (REMOVE_NOTE_TODO: reword) The compiler will insert calls to this procedure when exiting a local scope where implicit deallocation of a coarray is mandated by the standard and when a coarray is explicitly deallocated through a `deallocate-stmt` in the source code.
   * **Procedure Interface**:
-  ```
-    subroutine caf_deallocate(coarray_handles)
-      implicit none
-      type(caf_co_handle_t), dimension(:), intent(in) :: coarray_handles
-    end subroutine
-  ```
+    ```
+      subroutine caf_deallocate(coarray_handles)
+        implicit none
+        type(caf_co_handle_t), dimension(:), intent(in) :: coarray_handles
+      end subroutine
+    ```
   * **Argument descriptions**:
     * **`coarray_handles`**: Is an array of all of the handles for the coarrays that shall be deallocated.
 
@@ -356,60 +354,66 @@ REMOVE_NOTE_TODO: finish moving these down below in the procedure description ar
   * **`value`**
     * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
     * assumed-rank array of `type(*)`
-    * is
+    * is (REMOVE_NOTE_TODO: fill in)
+  * **`source`**
+    * Argument for [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
+    * assumed-rank array of `type(*)`
+    * is (REMOVE_NOTE_TODO: fill in)
+  * **`team` and `team_number`**
+    * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
+    * are optional arguments that specify a team
+    * shall not both be present in the same call
 
  #### `caf_put`
   * **Description**: This procedure assigns to a coarray. The compiler shall call this procedure when there is a coarray reference that is a `coindexed-object`. The compiler shall not (REMOVE_NOTE: need to?) call this procedure when the coarray reference is not a `coindexed-object`. This procedure blocks on local completion. (REMOVE_NOTE: eventually would like a caf_put that doesn't block on local completion).
   * **Procedure Interface**:
-  ```
-    subroutine caf_put(coarray_handle, coindices, team, team_number, target, value, stat)
-      implicit none
-      type(caf_co_handle_t), intent(in) :: coarray_handle
-      integer, intent(in) :: coindices(:)
-      type(*), dimension(..), intent(in) :: target, value
-      type(team_type), optional, intent(in) :: team
-      integer, optional, intent(in) :: team_number
-      integer, optional, intent(out) :: stat
-    end subroutine
-  ```
+    ```
+      subroutine caf_put(coarray_handle, coindices, team, team_number, target, value, stat)
+        implicit none
+        type(caf_co_handle_t), intent(in) :: coarray_handle
+        integer, intent(in) :: coindices(:)
+        type(*), dimension(..), intent(in) :: target, value
+        type(team_type), optional, intent(in) :: team
+        integer, optional, intent(in) :: team_number
+        integer, optional, intent(out) :: stat
+      end subroutine
+    ```
   * **Further argument descriptions**:
-    * **`team` and `team_number`**: optional arguments that specify a team. They shall not both be present in the same call.
     * **`value`**: The value that shall be assigned to (REMOVE_NOTE_TODO: fill in)
 
 
  #### `caf_get`
   * **Description**:
   * **Procedure Interface**:
-  ```
-    subroutine caf_get(coarray_handle, coindices, team, team_number, source, value, stat)
-      implicit none
-      type(caf_co_handle_t), intent(in) :: coarray_handle
-      integer, intent(in) :: coindices(:)
-      type(*), dimension(..), intent(in) :: source
-      type(*), dimension(..), intent(inout) :: value
-      type(team_type), optional, intent(in) :: team
-      integer, optional, intent(in) :: team_number
-      integer, optional, intent(out) :: stat
-    end subroutine
-  ```
-  * **Notes**: Both optional arguments `team` and `team_number` shall not be present in the same call
+    ```
+      subroutine caf_get(coarray_handle, coindices, team, team_number, source, value, stat)
+        implicit none
+        type(caf_co_handle_t), intent(in) :: coarray_handle
+        integer, intent(in) :: coindices(:)
+        type(*), dimension(..), intent(in) :: source
+        type(*), dimension(..), intent(inout) :: value
+        type(team_type), optional, intent(in) :: team
+        integer, optional, intent(in) :: team_number
+        integer, optional, intent(out) :: stat
+      end subroutine
+    ```
 
  #### `caf_get_async`
   * **Description**:
   * **Procedure Interface**:
-  ```
-    subroutine caf_get_async(coarray_handle, coindices, team, team_number, source, value, stat, async_handle)
-      implicit none
-      type(caf_co_handle_t),  intent(in) :: coarray_handle
-      integer, dimension(:),  intent(in) :: coindices
-      type(*), dimension(..), intent(in) :: source
-      type(*), dimension(..), intent(inout) :: value
-      type(team_type), optional, intent(in) :: team
-      integer, optional, intent(in) :: team_number
-      integer, optional, intent(out) :: stat
-      type(caf_async_handle_t), intent(out) :: async_handle
-    end subroutine
-  ```
+    ```
+      subroutine caf_get_async(coarray_handle, coindices, team, team_number, source, value, stat, async_handle)
+        implicit none
+        type(caf_co_handle_t),  intent(in) :: coarray_handle
+        integer, dimension(:),  intent(in) :: coindices
+        type(*), dimension(..), intent(in) :: source
+        type(*), dimension(..), intent(inout) :: value
+        type(team_type), optional, intent(in) :: team
+        integer, optional, intent(in) :: team_number
+        integer, optional, intent(out) :: stat
+        type(caf_async_handle_t), intent(out) :: async_handle
+      end subroutine
+    ```
 
 
 ###  Operation Synchronization
@@ -425,110 +429,201 @@ REMOVE_NOTE_TODO: finish moving these down below in the procedure description ar
  #### `caf_async_wait_for`
   * **Description**: This procedure waits until (REMOVE_NOTE: asynchronous?) operation is complete and then consumes the async handle
   * **Procedure Interface**:
-  ```
-    subroutine caf_async_wait_for(async_handle)
-      implicit none
-      type(caf_async_handle_t), intent(inout) :: async_handle
-    end subroutine
-  ```
+    ```
+      subroutine caf_async_wait_for(async_handle)
+        implicit none
+        type(caf_async_handle_t), intent(inout) :: async_handle
+      end subroutine
+    ```
 
  #### `caf_async_try_for`
   * **Description**: This procedure consumes the async handle if and only if the operation is complete
   * **Procedure Interface**:
-  ```
-    subroutine caf_async_try_for(async_handle, finished)
-      implicit none
-      type(caf_async_handle_t), intent(inout) :: async_handle
-      logical, intent(out) :: finished
-    end subroutine
-
-  ```
+    ```
+      subroutine caf_async_try_for(async_handle, finished)
+        implicit none
+        type(caf_async_handle_t), intent(inout) :: async_handle
+        logical, intent(out) :: finished
+      end subroutine
+    ```
+  * **Further argument descriptions**:
+    * **`finished`**: This argument returns `true` if the asynchronous operation is complete
 
  #### `caf_sync_memory`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_sync_memory(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
 ### Image Synchronization
 
  #### `caf_sync_all`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_sync_all(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_sync_images`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_sync_images(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_lock`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_lock(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_unlock`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_unlock(fill in...)
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_critical`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_critical(critical_id, REMOVE_NOTE_TODO: fill in)
+        implicit none
+        integer(kind=c_int64_t), intent(in) :: critical_id
+      end subroutine
+    ```
+  * **Further argument descriptions**:
+    * **`critical_id`**: shall be a unique identifier for a critical construct. This unique identifier will be used by the runtime library to track the location of the critical construct blocks.
 
 #### `caf_end_critical`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_end_critical(critical_id, REMOVE_NOTE_TODO: fill in)
+        implicit none
+        integer(kind=c_int64_t), intent(in) :: critical_id
+      end subroutine
+    ```
+  * **Further argument descriptions**:
+      * **`critical_id`**: shall be the same unique identifier for the critical construct that was passed to the runtime library during the corresponding call to `caf_critical`. REMOVE_NOTE_TODO: reword?
 
 ### Events
 
  #### `caf_event_post`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_event_post(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_event_wait`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_event_wait(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_event_query`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_event_query(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
 ### Teams
+  (REMOVE_NOTE_TODO: check the interface for caf_change_team and caf_form_team, currently are same as the procedures in Caffeine, but these interfaces have not yet been discussed and decided upon for the Coarray Fortran Parallel Runtime Library Interface. May need to add something? Change something?)
 
  #### `caf_change_team`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_change_team(team)
+        implicit none
+        type(team_type), target, intent(in) :: team
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_end_team`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_end_team(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_form_team`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_form_team(num, team, new_index, stat, errmsg)
+        implicit none
+        integer,          intent(in)  :: num
+        type(team_type),  intent(out) :: team
+        integer,          intent(in),    optional :: new_index
+        integer,          intent(out),   optional :: stat
+        character(len=*), intent(inout), optional :: errmsg
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_sync_team`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_sync_team(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_get_team`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_get_team(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_team_number`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_team_number(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
 ### Atomic Memory Operation
 
@@ -545,122 +640,223 @@ All atomic operations are blocking operations.
   * **Description**:
   * **Procedure Interface**: REMOVE_NOTE_TODO_DECISION:
   Option 1 with offset:
-  ```
-    subroutine caf_atomic_add(coarray_handle, coindicies, offset, value, stat)
-      type(caf_co_handle_t) :: coarray_handle
-      integer, intent(in) :: coindices(:)
-      integer :: offset, value, stat
-    end subroutine
-  ```
+    ```
+      subroutine caf_atomic_add(coarray_handle, coindicies, offset, value, stat)
+        implicit none
+        type(caf_co_handle_t) :: coarray_handle
+        integer, intent(in) :: coindices(:)
+        integer :: offset, value, stat
+      end subroutine
+    ```
 
   Option 2 with target:
-  ```
-    subroutine caf_atomic_add(coarray_handle, coindicies, target, value, stat)
-      type(caf_co_handle_t) :: coarray_handle
-      integer, intent(in) :: coindices(:) ! names image num
-      integer(kind=atomic_int_kind), intent(in) :: target !location of target is relevant, not the value of target, need this to compute the offset when the `atom` dummy argument to the intrinsic is part of a derived type
-      integer :: value, stat
-    end subroutine
-  ```
+    ```
+      subroutine caf_atomic_add(coarray_handle, coindicies, target, value, stat)
+        implicit none
+        type(caf_co_handle_t) :: coarray_handle
+        integer, intent(in) :: coindices(:) ! names image num
+        integer(kind=atomic_int_kind), intent(in) :: target !location of target is relevant, not the value of target, need this to compute the offset when the `atom` dummy argument to the intrinsic is part of a derived type
+        integer :: value, stat
+      end subroutine
+    ```
 
  #### `caf_atomic_and`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_atomic_and(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_atomic_cas`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_atomic_cas(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_atomic_define`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_atomic_define(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_atomic_fetch_add`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_atomic_fetch_add(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_atomic_fetch_and`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_atomic_fetch_and(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_atomic_fetch_or`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_atomic_fetch_or(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_atomic_fetch_xor`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_fetch_xor(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_atomic_or`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_atomic_or(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_atomic_ref`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_atomic_ref(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_atomic_xor`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_atomic_xor(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
 ### Coarray Queries
 
  #### `caf_lcobound`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_lcobound(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_ucobound`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_ucobound(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_coshape`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_coshape(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_image_index`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_image_index(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
 ### Image Queries
 
  #### `caf_num_images`
   * **Description**:
-  * **Procedure Interface**:
-  * **Arguments**:
+  * **Procedure Interface**:   (REMOVE_NOTE_TODO: check the interface for caf_num_images, currently is same as the procedure in Caffeine, but this interface has not yet been discussed and decided upon for the Coarray Fortran Parallel Runtime Library Interface. May need to add something? Change something?)
+    ```
+      function caf_num_images(team, team_number) result(image_count)
+        implicit none
+        type(team_type), intent(in), optional :: team
+        integer, intent(in), optional :: team_number
+        integer :: image_count
+      end function
+    ```
+  * **Further argument descriptions**:
+  * **Result**:
 
  #### `caf_this_image`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_this_image(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_failed_images`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_failed_images(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_stopped_images`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_stopped_images(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
  #### `caf_image_status`
   * **Description**:
   * **Procedure Interface**:
-  * **Arguments**:
+    ```
+      subroutine caf_image_status(fill in...)
+        implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
 
 
 ## Establish and initialize static coarrays prior to `main`
@@ -668,12 +864,16 @@ All atomic operations are blocking operations.
   (REMOVE_NOTE: complete this section, potentially move to earlier in doc) Compiler will need to: call caf_init, call caf_allocate ... for each coarray and in the right order. And then copy any initializers.
 
 
-## Berkeley Lab internal Notes: (REMOVE_NOTES before submission)
+## Internal Development Notes: (REMOVE_NOTES before submission)
   - REMOVE_NOTE_TODO_DECISION: Need to decide the thread semantics
   - REMOVE_NOTE_TODO_DECISION: Are we going to have Caffeine be thread safe? Have a thread safety option? Is it a build time option? or runtime?
         Dan advocates having a thread-safety option that is build time.
   - Do we need to add any discussion of what it would look like when code has mixed OpenMP and Coarray Fortran?
 
+ - boilerplate was added for all of the interfaces and initially everything was made a subroutine
+ - when all the interfaces are done, check them to make sure there were no interfaces created that could be a function, but were left a subroutine because forgot to change that aspect of the boilerplate
+
+  - critical construct - need to have a state saying whether we are in a critical construct or not, if we are in one, then we can ignore any further nested critical constructs.
 
   - Search for REMOVE_NOTE_TODO_DECISION to find locations where specific decisions/options are outlined, but not yet made.
   - Search for, resolve, and remove all REMOVE_NOTE and REMOVE_NOTE_TODO_DECISIONS before finalizing this document.
@@ -705,8 +905,6 @@ Caffeine internal procedure, so not part of the CAF PRI.
       (REMOVE_NOTE: are there no arguments? or is it just that we haven't sketched out the args yet?)
     end subroutine
   ```
-
-
 
 ### `caf_co_handle_t`
 
