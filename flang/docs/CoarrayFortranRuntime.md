@@ -287,12 +287,13 @@ The following table outlines which tasks will be the responsibility of the Fortr
     ```
       subroutine caf_stop(stop_code_int, stop_code_char)
         implicit none
-        integer, intent(in) :: stop_code_int
-        character(len=*), intent(in) :: stop_code_char
+        integer, intent(in), optional :: stop_code_int
+        character(len=*), intent(in), optional :: stop_code_char
       end subroutine
 
     ```
   * **Further argument descriptions**:
+    * **`stop_code_int` and `stop_code_char`**: shall not both be present in the same call (if provide only one procedure instead of overloading caf_stop)
 
  #### `caf_fail_image`
   * **Description**:
@@ -816,6 +817,7 @@ All atomic operations are blocking operations.
       end function
     ```
   * **Further argument descriptions**:
+    * **`team` and `team_number`**: optional arguments that specify a team. They shall not both be present in the same call.
   * **Result**:
 
  #### `caf_this_image`
