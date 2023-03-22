@@ -24,7 +24,7 @@
 ! FULL-LTO: "-fc1"
 ! FULL-LTO-SAME: "-flto=full"
 
-! THIN-LTO: flang-new: warning: the option '-flto=thin' is a work in progress
+! THIN-LTO: flang: warning: the option '-flto=thin' is a work in progress
 ! THIN-LTO: "-fc1"
 ! THIN-LTO-SAME: "-flto=thin"
 ! THIN-LTO: "-plugin-opt=thinlto"
