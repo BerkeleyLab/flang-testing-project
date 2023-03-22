@@ -369,7 +369,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
   * **Description**: This procedure assigns to a coarray. The compiler shall call this procedure when there is a coarray reference that is a `coindexed-object`. The compiler shall not (REMOVE_NOTE: need to?) call this procedure when the coarray reference is not a `coindexed-object`. This procedure blocks on local completion. (REMOVE_NOTE: eventually would like a caf_put that doesn't block on local completion).
   * **Procedure Interface**:
     ```
-      subroutine caf_put(coarray_handle, coindices, team, team_number, target, value, stat)
+      subroutine caf_put(coarray_handle, coindices, target, value, team, team_number, stat)
         implicit none
         type(caf_co_handle_t), intent(in) :: coarray_handle
         integer, intent(in) :: coindices(:)
@@ -387,7 +387,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_get(coarray_handle, coindices, team, team_number, source, value, stat)
+      subroutine caf_get(coarray_handle, coindices, source, value, team, team_number, stat)
         implicit none
         type(caf_co_handle_t), intent(in) :: coarray_handle
         integer, intent(in) :: coindices(:)
@@ -403,16 +403,16 @@ The following table outlines which tasks will be the responsibility of the Fortr
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_get_async(coarray_handle, coindices, team, team_number, source, value, stat, async_handle)
+      subroutine caf_get_async(coarray_handle, coindices, source, value, async_handle, team, team_number, stat)
         implicit none
         type(caf_co_handle_t),  intent(in) :: coarray_handle
         integer, dimension(:),  intent(in) :: coindices
         type(*), dimension(..), intent(in) :: source
         type(*), dimension(..), intent(inout) :: value
+        type(caf_async_handle_t), intent(out) :: async_handle
         type(team_type), optional, intent(in) :: team
         integer, optional, intent(in) :: team_number
         integer, optional, intent(out) :: stat
-        type(caf_async_handle_t), intent(out) :: async_handle
       end subroutine
     ```
 
