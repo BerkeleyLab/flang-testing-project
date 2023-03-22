@@ -78,6 +78,18 @@ LogicalResult RawBufferAtomicFaddOp::verify() {
   return verifyRawBufferOp(*this);
 }
 
+LogicalResult RawBufferAtomicFmaxOp::verify() {
+  return verifyRawBufferOp(*this);
+}
+
+LogicalResult RawBufferAtomicSmaxOp::verify() {
+  return verifyRawBufferOp(*this);
+}
+
+LogicalResult RawBufferAtomicUminOp::verify() {
+  return verifyRawBufferOp(*this);
+}
+
 static std::optional<uint32_t> getConstantUint32(Value v) {
   APInt cst;
   if (!v.getType().isInteger(32))
@@ -168,6 +180,21 @@ void RawBufferAtomicFaddOp::getCanonicalizationPatterns(
   results.add<RemoveStaticallyOobBufferWrites<RawBufferAtomicFaddOp>>(context);
 }
 
+void RawBufferAtomicFmaxOp::getCanonicalizationPatterns(
+    RewritePatternSet &results, MLIRContext *context) {
+  results.add<RemoveStaticallyOobBufferWrites<RawBufferAtomicFmaxOp>>(context);
+}
+
+void RawBufferAtomicSmaxOp::getCanonicalizationPatterns(
+    RewritePatternSet &results, MLIRContext *context) {
+  results.add<RemoveStaticallyOobBufferWrites<RawBufferAtomicSmaxOp>>(context);
+}
+
+void RawBufferAtomicUminOp::getCanonicalizationPatterns(
+    RewritePatternSet &results, MLIRContext *context) {
+  results.add<RemoveStaticallyOobBufferWrites<RawBufferAtomicUminOp>>(context);
+}
+
 //===----------------------------------------------------------------------===//
 // MFMAOp
 //===----------------------------------------------------------------------===//
@@ -189,6 +216,24 @@ LogicalResult MFMAOp::verify() {
     destElem = destVector.getElementType();
   }
 
+  Type sourceBType = getSourceB().getType();
+  if (sourceElem.isFloat8E5M2FNUZ() || sourceElem.isFloat8E4M3FNUZ()) {
+    int64_t sourceBLen = 1;
+    Type sourceBElem = sourceBType;
+    if (auto sourceBVector = sourceBType.dyn_cast<VectorType>()) {
+      sourceBLen = sourceBVector.getNumElements();
+      sourceBElem = sourceBVector.getElementType();
+    }
+    if (!sourceBElem.isFloat8E5M2FNUZ() && !sourceBElem.isFloat8E4M3FNUZ())
+      return emitOpError("expected both source operands to have f8 elements");
+    if (sourceLen != sourceBLen)
+      return emitOpError(
+          "expected both f8 source vectors to have the same length");
+  } else {
+    if (sourceType != sourceBType)
+      return emitOpError(
+          "expected both non-f8 source operand types to match exactly");
+  }
   // Normalize the wider integer types the compiler expects to i8
   if (sourceElem.isInteger(32)) {
     sourceLen *= 4;

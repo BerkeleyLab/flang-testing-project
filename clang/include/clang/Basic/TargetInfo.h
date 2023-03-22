@@ -225,7 +225,6 @@ protected:
   bool HasStrictFP;
 
   unsigned char MaxAtomicPromoteWidth, MaxAtomicInlineWidth;
-  unsigned short SimdDefaultAlign;
   std::string DataLayoutString;
   const char *UserLabelPrefix;
   const char *MCountName;
@@ -794,10 +793,6 @@ public:
 
   /// Return the maximum vector alignment supported for the given target.
   unsigned getMaxVectorAlign() const { return MaxVectorAlign; }
-  /// Return default simd alignment for the given target. Generally, this
-  /// value is type-specific, but this alignment can be used for most of the
-  /// types for the given target.
-  unsigned getSimdDefaultAlign() const { return SimdDefaultAlign; }
 
   unsigned getMaxOpenCLWorkGroupSize() const { return MaxOpenCLWorkGroupSize; }
 
@@ -1338,10 +1333,14 @@ public:
   }
 
   /// Returns true if feature has an impact on target code
-  /// generation and get its dependent options in second argument.
-  virtual bool getFeatureDepOptions(StringRef Feature,
-                                    std::string &Options) const {
+  /// generation.
+  virtual bool doesFeatureAffectCodeGen(StringRef Feature) const {
     return true;
+  }
+
+  /// For given feature return dependent ones.
+  virtual StringRef getFeatureDependencies(StringRef Feature) const {
+    return StringRef();
   }
 
   struct BranchProtectionInfo {

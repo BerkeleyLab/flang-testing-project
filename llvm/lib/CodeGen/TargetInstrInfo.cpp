@@ -19,6 +19,7 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineScheduler.h"
+#include "llvm/CodeGen/MachineTraceMetrics.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/ScoreboardHazardRecognizer.h"
 #include "llvm/CodeGen/StackMaps.h"
@@ -1016,6 +1017,17 @@ void TargetInstrInfo::reassociateOps(
   InsInstrs.push_back(MIB2);
   DelInstrs.push_back(&Prev);
   DelInstrs.push_back(&Root);
+
+  // We transformed:
+  // B = A op X (Prev)
+  // C = B op Y (Root)
+  // Into:
+  // B = X op Y (MIB1)
+  // C = A op B (MIB2)
+  // C has the same value as before, B doesn't; as such, keep the debug number
+  // of C but not of B.
+  if (unsigned OldRootNum = Root.peekDebugInstrNum())
+    MIB2.getInstr()->setDebugInstrNum(OldRootNum);
 }
 
 void TargetInstrInfo::genAlternativeCodeSequence(
@@ -1037,16 +1049,18 @@ void TargetInstrInfo::genAlternativeCodeSequence(
     Prev = MRI.getUniqueVRegDef(Root.getOperand(2).getReg());
     break;
   default:
-    break;
+    llvm_unreachable("Unknown pattern for machine combiner");
   }
 
   // Don't reassociate if Prev and Root are in different blocks.
   if (Prev->getParent() != Root.getParent())
     return;
 
-  assert(Prev && "Unknown pattern for machine combiner");
-
   reassociateOps(Root, *Prev, Pattern, InsInstrs, DelInstrs, InstIdxForVirtReg);
+}
+
+MachineTraceStrategy TargetInstrInfo::getMachineCombinerTraceStrategy() const {
+  return MachineTraceStrategy::TS_MinInstrCount;
 }
 
 bool TargetInstrInfo::isReallyTriviallyReMaterializableGeneric(

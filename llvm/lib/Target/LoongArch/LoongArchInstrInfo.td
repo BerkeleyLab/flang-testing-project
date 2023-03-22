@@ -328,6 +328,17 @@ def simm26_symbol : Operand<GRLenVT> {
   let DecoderMethod = "decodeSImmOperand<26, 2>";
 }
 
+// A 32-bit signed immediate with the lowest 16 bits zeroed, suitable for
+// direct use with `addu16i.d`.
+def simm16_lsl16 : Operand<GRLenVT>,
+    ImmLeaf<GRLenVT, [{return isShiftedInt<16, 16>(Imm);}]>;
+
+// A 32-bit signed immediate expressible with a pair of `addu16i.d + addi` for
+// use in additions.
+def simm32_hi16_lo12: Operand<GRLenVT>, ImmLeaf<GRLenVT, [{
+  return isShiftedInt<16, 16>(Imm - SignExtend64<12>(Imm));
+}]>;
+
 def BareSymbol : AsmOperandClass {
   let Name = "BareSymbol";
   let RenderMethod = "addImmOperands";
@@ -361,6 +372,26 @@ def fpimm1    : PatLeaf<(fpimm), [{return N->isExactlyValue(+1.0);}]>;
 def ImmSubFrom32 : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(32 - N->getZExtValue(), SDLoc(N),
                                    N->getValueType(0));
+}]>;
+
+// Return the lowest 12 bits of the signed immediate.
+def LO12: SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(SignExtend64<12>(N->getSExtValue()),
+                                   SDLoc(N), N->getValueType(0));
+}]>;
+
+// Return the higher 16 bits of the signed immediate.
+def HI16 : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(N->getSExtValue() >> 16, SDLoc(N),
+                                   N->getValueType(0));
+}]>;
+
+// Return the higher 16 bits of the signed immediate, adjusted for use within an
+// `addu16i.d + addi` pair.
+def HI16ForAddu16idAddiPair: SDNodeXForm<imm, [{
+  auto Imm = N->getSExtValue();
+  return CurDAG->getTargetConstant((Imm - SignExtend64<12>(Imm)) >> 16,
+                                   SDLoc(N), N->getValueType(0));
 }]>;
 
 def BaseAddr : ComplexPattern<iPTR, 1, "SelectBaseAddr">;
@@ -816,6 +847,13 @@ def : PatGprGpr<mulhs, MULH_W>;
 def : PatGprGpr<mulhu, MULH_WU>;
 def : PatGprGpr<rotr, ROTR_W>;
 def : PatGprImm<rotr, ROTRI_W, uimm5>;
+
+foreach Idx = 1...3 in {
+  defvar ShamtA = !mul(8, Idx);
+  defvar ShamtB = !mul(8, !sub(4, Idx));
+  def : Pat<(or (shl GPR:$rk, (i32 ShamtA)), (srl GPR:$rj, (i32 ShamtB))),
+            (BYTEPICK_W GPR:$rj, GPR:$rk, Idx)>;
+}
 } // Predicates = [IsLA32]
 
 let Predicates = [IsLA64] in {
@@ -851,6 +889,33 @@ def : Pat<(i64 (mul (sext_inreg GPR:$rj, i32), (sext_inreg GPR:$rk, i32))),
 def : Pat<(i64 (mul (loongarch_bstrpick GPR:$rj, (i64 31), (i64 0)),
                     (loongarch_bstrpick GPR:$rk, (i64 31), (i64 0)))),
           (MULW_D_WU GPR:$rj, GPR:$rk)>;
+
+def : Pat<(add GPR:$rj, simm16_lsl16:$imm),
+          (ADDU16I_D GPR:$rj, (HI16 $imm))>;
+def : Pat<(add GPR:$rj, simm32_hi16_lo12:$imm),
+          (ADDI_D (ADDU16I_D GPR:$rj, (HI16ForAddu16idAddiPair $imm)),
+                  (LO12 $imm))>;
+def : Pat<(sext_inreg (add GPR:$rj, simm32_hi16_lo12:$imm), i32),
+          (ADDI_W (ADDU16I_D GPR:$rj, (HI16ForAddu16idAddiPair $imm)),
+                  (LO12 $imm))>;
+
+foreach Idx = 1...7 in {
+  defvar ShamtA = !mul(8, Idx);
+  defvar ShamtB = !mul(8, !sub(8, Idx));
+  def : Pat<(or (shl GPR:$rk, (i64 ShamtA)), (srl GPR:$rj, (i64 ShamtB))),
+            (BYTEPICK_D GPR:$rj, GPR:$rk, Idx)>;
+}
+
+foreach Idx = 1...3 in {
+  defvar ShamtA = !mul(8, Idx);
+  defvar ShamtB = !mul(8, !sub(4, Idx));
+  // NOTE: the srl node would already be transformed into a loongarch_bstrpick
+  // by the time this pattern gets to execute, hence the weird construction.
+  def : Pat<(sext_inreg (or (shl GPR:$rk, (i64 ShamtA)),
+                            (loongarch_bstrpick GPR:$rj, (i64 31),
+                                                         (i64 ShamtB))), i32),
+            (BYTEPICK_W GPR:$rj, GPR:$rk, Idx)>;
+}
 } // Predicates = [IsLA64]
 
 def : PatGprGpr<and, AND>;

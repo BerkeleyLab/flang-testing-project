@@ -3,7 +3,7 @@
 // DEFINE: %{run} = TENSOR0="%mlir_src_dir/test/Integration/data/test.mtx" \
 // DEFINE: mlir-cpu-runner \
 // DEFINE:  -e entry -entry-point-result=void  \
-// DEFINE:  -shared-libs=%mlir_lib_dir/libmlir_c_runner_utils%shlibext | \
+// DEFINE:  -shared-libs=%mlir_c_runner_utils | \
 // DEFINE: FileCheck %s
 //
 // RUN: %{compile} | %{run}
@@ -32,8 +32,8 @@
 
 #SparseMatrix = #sparse_tensor.encoding<{
   dimLevelType = [ "compressed", "compressed" ],
-  pointerBitWidth = 32,
-  indexBitWidth = 32
+  posWidth = 32,
+  crdWidth = 32
 }>
 
 #trait_sampled_dense_dense = {

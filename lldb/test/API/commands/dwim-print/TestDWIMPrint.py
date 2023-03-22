@@ -16,16 +16,16 @@ class TestCase(TestBase):
         self.ci.HandleCommand(cmd, result)
         return result.GetOutput().rstrip()
 
-    PERSISTENT_VAR = re.compile(r"\$\d+")
+    VAR_IDENT = re.compile(r"(?:\$\d+|\w+) = ")
 
-    def _mask_persistent_var(self, string: str) -> str:
+    def _strip_result_var(self, string: str) -> str:
         """
-        Replace persistent result variables (ex '$0', '$1', etc) with a regex
-        that matches any persistent result (r'\$\d+'). The returned string can
-        be matched against other `expression` results.
+        Strip (persistent) result variables (ex '$0 = ', or 'someVar = ', etc).
+
+        This allows for using the output of `expression`/`frame variable`, to
+        compare it to `dwim-print` output, which disables result variables.
         """
-        before, after = self.PERSISTENT_VAR.split(string, maxsplit=1)
-        return re.escape(before) + r"\$\d+" + re.escape(after)
+        return self.VAR_IDENT.subn("", string, 1)[0]
 
     def _expect_cmd(
         self,
@@ -44,19 +44,16 @@ class TestCase(TestBase):
         if actual_cmd == "frame variable":
             resolved_cmd = resolved_cmd.replace(" -- ", " ", 1)
 
-        expected_output = self._run_cmd(resolved_cmd)
+        resolved_cmd_output = self._run_cmd(resolved_cmd)
+        dwim_cmd_output = self._strip_result_var(resolved_cmd_output)
 
         # Verify dwim-print chose the expected command.
         self.runCmd("settings set dwim-print-verbosity full")
-        substrs = [f"note: ran `{resolved_cmd}`"]
-        patterns = []
 
-        if actual_cmd == "expression" and self.PERSISTENT_VAR.search(expected_output):
-            patterns.append(self._mask_persistent_var(expected_output))
-        else:
-            substrs.append(expected_output)
-
-        self.expect(dwim_cmd, substrs=substrs, patterns=patterns)
+        self.expect(dwim_cmd, substrs=[
+            f"note: ran `{resolved_cmd}`",
+            dwim_cmd_output,
+        ])
 
     def test_variables(self):
         """Test dwim-print with variables."""
@@ -103,3 +100,10 @@ class TestCase(TestBase):
         lldbutil.run_to_name_breakpoint(self, "main")
         self._expect_cmd(f"dwim-print -T -- argc", "frame variable")
         self._expect_cmd(f"dwim-print -T -- argc + 1", "expression")
+
+    def test_expression_language(self):
+        """Test that the language flag doesn't affect the choice of command."""
+        self.build()
+        lldbutil.run_to_name_breakpoint(self, "main")
+        self._expect_cmd(f"dwim-print -l c++ -- argc", "frame variable")
+        self._expect_cmd(f"dwim-print -l c++ -- argc + 1", "expression")

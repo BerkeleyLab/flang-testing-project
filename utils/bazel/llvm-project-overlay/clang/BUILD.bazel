@@ -1026,6 +1026,7 @@ cc_library(
     deps = [
         ":basic",
         ":frontend",
+        "//llvm:MC",
         "//llvm:Support",
         "//third-party/unittest:gtest",
     ],
@@ -1162,6 +1163,7 @@ cc_library(
         ":serialization",
         ":tooling",
         "//llvm:Support",
+        "//llvm:TargetParser",
     ],
 )
 
@@ -1219,6 +1221,9 @@ cc_library(
     hdrs = [
         "lib/Format/FormatTokenLexer.h",
         "lib/Format/Macros.h",
+        "lib/Format/UnwrappedLineParser.h",
+        "lib/Format/FormatTokenSource.h",
+        "lib/Format/QualifierAlignmentFixer.h",
     ] + glob([
         "include/clang/Format/*.h",
     ]),
@@ -1632,6 +1637,7 @@ cc_library(
         "//llvm:OrcJIT",
         "//llvm:Support",
         "//llvm:Target",
+        "//llvm:TargetParser",
     ],
 )
 
@@ -1991,6 +1997,7 @@ cc_binary(
         ":parse",
         "//llvm:Core",
         "//llvm:Support",
+        "//llvm:TargetParser",
     ],
 )
 
@@ -2230,6 +2237,7 @@ cc_binary(
         ":tooling",
         ":tooling_dependency_scanning",
         "//llvm:Support",
+        "//llvm:TargetParser",
     ],
 )
 

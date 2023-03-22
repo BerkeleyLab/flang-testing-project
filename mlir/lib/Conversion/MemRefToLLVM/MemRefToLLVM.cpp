@@ -17,10 +17,12 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/FunctionCallUtils.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Support/MathExtras.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include <optional>
 
@@ -380,14 +382,27 @@ struct DeallocOpLowering : public ConvertOpToLLVMPattern<memref::DeallocOp> {
     // Insert the `free` declaration if it is not already present.
     LLVM::LLVMFuncOp freeFunc =
         getFreeFn(getTypeConverter(), op->getParentOfType<ModuleOp>());
-    MemRefDescriptor memref(adaptor.getMemref());
-    Value allocatedPtr = memref.allocatedPtr(rewriter, op.getLoc());
-    Value casted = allocatedPtr;
+    Value allocatedPtr;
+    if (auto unrankedTy =
+            llvm::dyn_cast<UnrankedMemRefType>(op.getMemref().getType())) {
+      Type elementType = unrankedTy.getElementType();
+      Type llvmElementTy = getTypeConverter()->convertType(elementType);
+      LLVM::LLVMPointerType elementPtrTy = getTypeConverter()->getPointerType(
+          llvmElementTy, unrankedTy.getMemorySpaceAsInt());
+      allocatedPtr = UnrankedMemRefDescriptor::allocatedPtr(
+          rewriter, op.getLoc(),
+          UnrankedMemRefDescriptor(adaptor.getMemref())
+              .memRefDescPtr(rewriter, op.getLoc()),
+          elementPtrTy);
+    } else {
+      allocatedPtr = MemRefDescriptor(adaptor.getMemref())
+                         .allocatedPtr(rewriter, op.getLoc());
+    }
     if (!getTypeConverter()->useOpaquePointers())
-      casted = rewriter.create<LLVM::BitcastOp>(op.getLoc(), getVoidPtrType(),
-                                                allocatedPtr);
+      allocatedPtr = rewriter.create<LLVM::BitcastOp>(
+          op.getLoc(), getVoidPtrType(), allocatedPtr);
 
-    rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, freeFunc, casted);
+    rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, freeFunc, allocatedPtr);
     return success();
   }
 };
@@ -493,14 +508,16 @@ private:
     MemRefType memRefType = operandType.cast<MemRefType>();
     if (std::optional<int64_t> index = getConstantDimIndex(dimOp)) {
       int64_t i = *index;
-      if (memRefType.isDynamicDim(i)) {
-        // extract dynamic size from the memref descriptor.
-        MemRefDescriptor descriptor(adaptor.getSource());
-        return descriptor.size(rewriter, loc, i);
+      if (i >= 0 && i < memRefType.getRank()) {
+        if (memRefType.isDynamicDim(i)) {
+          // extract dynamic size from the memref descriptor.
+          MemRefDescriptor descriptor(adaptor.getSource());
+          return descriptor.size(rewriter, loc, i);
+        }
+        // Use constant for static size.
+        int64_t dimSize = memRefType.getDimSize(i);
+        return createIndexConstant(rewriter, loc, dimSize);
       }
-      // Use constant for static size.
-      int64_t dimSize = memRefType.getDimSize(i);
-      return createIndexConstant(rewriter, loc, dimSize);
     }
     Value index = adaptor.getIndex();
     int64_t rank = memRefType.getRank();
@@ -563,15 +580,11 @@ struct GenericAtomicRMWOpLowering
 
     // Split the block into initial, loop, and ending parts.
     auto *initBlock = rewriter.getInsertionBlock();
-    auto *loopBlock = rewriter.createBlock(
-        initBlock->getParent(), std::next(Region::iterator(initBlock)),
-        valueType, loc);
-    auto *endBlock = rewriter.createBlock(
-        loopBlock->getParent(), std::next(Region::iterator(loopBlock)));
+    auto *loopBlock = rewriter.splitBlock(initBlock, Block::iterator(atomicOp));
+    loopBlock->addArgument(valueType, loc);
 
-    // Operations range to be moved to `endBlock`.
-    auto opsToMoveStart = atomicOp->getIterator();
-    auto opsToMoveEnd = initBlock->back().getIterator();
+    auto *endBlock =
+        rewriter.splitBlock(loopBlock, Block::iterator(atomicOp)++);
 
     // Compute the loaded value and branch to the loop block.
     rewriter.setInsertionPointToEnd(initBlock);
@@ -611,29 +624,11 @@ struct GenericAtomicRMWOpLowering
                                     loopBlock, newLoaded);
 
     rewriter.setInsertionPointToEnd(endBlock);
-    moveOpsRange(atomicOp.getResult(), newLoaded, std::next(opsToMoveStart),
-                 std::next(opsToMoveEnd), rewriter);
 
     // The 'result' of the atomic_rmw op is the newly loaded value.
     rewriter.replaceOp(atomicOp, {newLoaded});
 
     return success();
-  }
-
-private:
-  // Clones a segment of ops [start, end) and erases the original.
-  void moveOpsRange(ValueRange oldResult, ValueRange newResult,
-                    Block::iterator start, Block::iterator end,
-                    ConversionPatternRewriter &rewriter) const {
-    IRMapping mapping;
-    mapping.map(oldResult, newResult);
-    SmallVector<Operation *, 2> opsToErase;
-    for (auto it = start; it != end; ++it) {
-      rewriter.clone(*it, mapping);
-      opsToErase.push_back(&*it);
-    }
-    for (auto *it : opsToErase)
-      rewriter.eraseOp(it);
   }
 };
 
@@ -1093,6 +1088,118 @@ struct MemRefCopyOpLowering : public ConvertOpToLLVMPattern<memref::CopyOp> {
       return lowerToMemCopyIntrinsic(op, adaptor, rewriter);
 
     return lowerToMemCopyFunctionCall(op, adaptor, rewriter);
+  }
+};
+
+struct MemorySpaceCastOpLowering
+    : public ConvertOpToLLVMPattern<memref::MemorySpaceCastOp> {
+  using ConvertOpToLLVMPattern<
+      memref::MemorySpaceCastOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(memref::MemorySpaceCastOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    Type resultType = op.getDest().getType();
+    if (auto resultTypeR = resultType.dyn_cast<MemRefType>()) {
+      auto resultDescType =
+          typeConverter->convertType(resultTypeR).cast<LLVM::LLVMStructType>();
+      Type newPtrType = resultDescType.getBody()[0];
+
+      SmallVector<Value> descVals;
+      MemRefDescriptor::unpack(rewriter, loc, adaptor.getSource(), resultTypeR,
+                               descVals);
+      descVals[0] =
+          rewriter.create<LLVM::AddrSpaceCastOp>(loc, newPtrType, descVals[0]);
+      descVals[1] =
+          rewriter.create<LLVM::AddrSpaceCastOp>(loc, newPtrType, descVals[1]);
+      Value result = MemRefDescriptor::pack(rewriter, loc, *getTypeConverter(),
+                                            resultTypeR, descVals);
+      rewriter.replaceOp(op, result);
+      return success();
+    }
+    if (auto resultTypeU = resultType.dyn_cast<UnrankedMemRefType>()) {
+      // Since the type converter won't be doing this for us, get the address
+      // space.
+      auto sourceType = op.getSource().getType().cast<UnrankedMemRefType>();
+      FailureOr<unsigned> maybeSourceAddrSpace =
+          getTypeConverter()->getMemRefAddressSpace(sourceType);
+      if (failed(maybeSourceAddrSpace))
+        return rewriter.notifyMatchFailure(loc,
+                                           "non-integer source address space");
+      unsigned sourceAddrSpace = *maybeSourceAddrSpace;
+      FailureOr<unsigned> maybeResultAddrSpace =
+          getTypeConverter()->getMemRefAddressSpace(resultTypeU);
+      if (failed(maybeResultAddrSpace))
+        return rewriter.notifyMatchFailure(loc,
+                                           "non-integer result address space");
+      unsigned resultAddrSpace = *maybeResultAddrSpace;
+
+      UnrankedMemRefDescriptor sourceDesc(adaptor.getSource());
+      Value rank = sourceDesc.rank(rewriter, loc);
+      Value sourceUnderlyingDesc = sourceDesc.memRefDescPtr(rewriter, loc);
+
+      // Create and allocate storage for new memref descriptor.
+      auto result = UnrankedMemRefDescriptor::undef(
+          rewriter, loc, typeConverter->convertType(resultTypeU));
+      result.setRank(rewriter, loc, rank);
+      SmallVector<Value, 1> sizes;
+      UnrankedMemRefDescriptor::computeSizes(rewriter, loc, *getTypeConverter(),
+                                             result, resultAddrSpace, sizes);
+      Value resultUnderlyingSize = sizes.front();
+      Value resultUnderlyingDesc = rewriter.create<LLVM::AllocaOp>(
+          loc, getVoidPtrType(), rewriter.getI8Type(), resultUnderlyingSize);
+      result.setMemRefDescPtr(rewriter, loc, resultUnderlyingDesc);
+
+      // Copy pointers, performing address space casts.
+      Type llvmElementType =
+          typeConverter->convertType(sourceType.getElementType());
+      LLVM::LLVMPointerType sourceElemPtrType =
+          getTypeConverter()->getPointerType(llvmElementType, sourceAddrSpace);
+      auto resultElemPtrType =
+          getTypeConverter()->getPointerType(llvmElementType, resultAddrSpace);
+
+      Value allocatedPtr = sourceDesc.allocatedPtr(
+          rewriter, loc, sourceUnderlyingDesc, sourceElemPtrType);
+      Value alignedPtr =
+          sourceDesc.alignedPtr(rewriter, loc, *getTypeConverter(),
+                                sourceUnderlyingDesc, sourceElemPtrType);
+      allocatedPtr = rewriter.create<LLVM::AddrSpaceCastOp>(
+          loc, resultElemPtrType, allocatedPtr);
+      alignedPtr = rewriter.create<LLVM::AddrSpaceCastOp>(
+          loc, resultElemPtrType, alignedPtr);
+
+      result.setAllocatedPtr(rewriter, loc, resultUnderlyingDesc,
+                             resultElemPtrType, allocatedPtr);
+      result.setAlignedPtr(rewriter, loc, *getTypeConverter(),
+                           resultUnderlyingDesc, resultElemPtrType, alignedPtr);
+
+      // Copy all the index-valued operands.
+      Value sourceIndexVals =
+          sourceDesc.offsetBasePtr(rewriter, loc, *getTypeConverter(),
+                                   sourceUnderlyingDesc, sourceElemPtrType);
+      Value resultIndexVals =
+          result.offsetBasePtr(rewriter, loc, *getTypeConverter(),
+                               resultUnderlyingDesc, resultElemPtrType);
+
+      int64_t bytesToSkip =
+          2 *
+          ceilDiv(getTypeConverter()->getPointerBitwidth(resultAddrSpace), 8);
+      Value bytesToSkipConst = rewriter.create<LLVM::ConstantOp>(
+          loc, getIndexType(), rewriter.getIndexAttr(bytesToSkip));
+      Value copySize = rewriter.create<LLVM::SubOp>(
+          loc, getIndexType(), resultUnderlyingSize, bytesToSkipConst);
+      Type llvmBool = typeConverter->convertType(rewriter.getI1Type());
+      Value nonVolatile = rewriter.create<LLVM::ConstantOp>(
+          loc, llvmBool, rewriter.getBoolAttr(false));
+      rewriter.create<LLVM::MemcpyOp>(loc, resultIndexVals, sourceIndexVals,
+                                      copySize, nonVolatile);
+
+      rewriter.replaceOp(op, ValueRange{result});
+      return success();
+    }
+    return rewriter.notifyMatchFailure(loc, "unexpected memref type");
   }
 };
 
@@ -1785,6 +1892,7 @@ void mlir::populateFinalizeMemRefToLLVMConversionPatterns(
       LoadOpLowering,
       MemRefCastOpLowering,
       MemRefCopyOpLowering,
+      MemorySpaceCastOpLowering,
       MemRefReinterpretCastOpLowering,
       MemRefReshapeOpLowering,
       PrefetchOpLowering,

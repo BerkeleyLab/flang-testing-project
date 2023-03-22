@@ -48,7 +48,7 @@
 #include <functional>
 
 namespace mlir {
-#define GEN_PASS_DEF_CONVERTFUNCTOLLVM
+#define GEN_PASS_DEF_CONVERTFUNCTOLLVMPASS
 #include "mlir/Conversion/Passes.h.inc"
 } // namespace mlir
 
@@ -134,7 +134,7 @@ static void wrapForExternalCallers(OpBuilder &rewriter, Location loc,
 
   SmallVector<Value, 8> args;
   size_t argOffset = resultStructType ? 1 : 0;
-  for (auto &[index, argType] : llvm::enumerate(type.getInputs())) {
+  for (auto [index, argType] : llvm::enumerate(type.getInputs())) {
     Value arg = wrapperFuncOp.getArgument(index + argOffset);
     if (auto memrefType = argType.dyn_cast<MemRefType>()) {
       Value loaded = rewriter.create<LLVM::LoadOp>(
@@ -222,11 +222,11 @@ static void wrapExternalFunction(OpBuilder &builder, Location loc,
 
   // Iterate over the inputs of the original function and pack values into
   // memref descriptors if the original type is a memref.
-  for (auto &en : llvm::enumerate(type.getInputs())) {
+  for (Type input : type.getInputs()) {
     Value arg;
     int numToDrop = 1;
-    auto memRefType = en.value().dyn_cast<MemRefType>();
-    auto unrankedMemRefType = en.value().dyn_cast<UnrankedMemRefType>();
+    auto memRefType = input.dyn_cast<MemRefType>();
+    auto unrankedMemRefType = input.dyn_cast<UnrankedMemRefType>();
     if (memRefType || unrankedMemRefType) {
       numToDrop = memRefType
                       ? MemRefDescriptor::getNumUnpackedValues(memRefType)
@@ -677,9 +677,8 @@ struct ReturnOpLowering : public ConvertOpToLLVMPattern<func::ReturnOp> {
         getTypeConverter()->packFunctionResults(op.getOperandTypes());
 
     Value packed = rewriter.create<LLVM::UndefOp>(loc, packedType);
-    for (auto &it : llvm::enumerate(updatedOperands)) {
-      packed = rewriter.create<LLVM::InsertValueOp>(loc, packed, it.value(),
-                                                    it.index());
+    for (auto [idx, operand] : llvm::enumerate(updatedOperands)) {
+      packed = rewriter.create<LLVM::InsertValueOp>(loc, packed, operand, idx);
     }
     rewriter.replaceOpWithNewOp<LLVM::ReturnOp>(op, TypeRange(), packed,
                                                 op->getAttrs());
@@ -711,15 +710,8 @@ void mlir::populateFuncToLLVMConversionPatterns(LLVMTypeConverter &converter,
 namespace {
 /// A pass converting Func operations into the LLVM IR dialect.
 struct ConvertFuncToLLVMPass
-    : public impl::ConvertFuncToLLVMBase<ConvertFuncToLLVMPass> {
-  ConvertFuncToLLVMPass() = default;
-  ConvertFuncToLLVMPass(bool useBarePtrCallConv, unsigned indexBitwidth,
-                        bool useAlignedAlloc,
-                        const llvm::DataLayout &dataLayout) {
-    this->useBarePtrCallConv = useBarePtrCallConv;
-    this->indexBitwidth = indexBitwidth;
-    this->dataLayout = dataLayout.getStringRepresentation();
-  }
+    : public impl::ConvertFuncToLLVMPassBase<ConvertFuncToLLVMPass> {
+  using Base::Base;
 
   /// Run the dialect converter on the module.
   void runOnOperation() override {
@@ -761,21 +753,3 @@ struct ConvertFuncToLLVMPass
   }
 };
 } // namespace
-
-std::unique_ptr<OperationPass<ModuleOp>> mlir::createConvertFuncToLLVMPass() {
-  return std::make_unique<ConvertFuncToLLVMPass>();
-}
-
-std::unique_ptr<OperationPass<ModuleOp>>
-mlir::createConvertFuncToLLVMPass(const LowerToLLVMOptions &options) {
-  auto allocLowering = options.allocLowering;
-  // There is no way to provide additional patterns for pass, so
-  // AllocLowering::None will always fail.
-  assert(allocLowering != LowerToLLVMOptions::AllocLowering::None &&
-         "ConvertFuncToLLVMPass doesn't support AllocLowering::None");
-  bool useAlignedAlloc =
-      (allocLowering == LowerToLLVMOptions::AllocLowering::AlignedAlloc);
-  return std::make_unique<ConvertFuncToLLVMPass>(
-      options.useBarePtrCallConv, options.getIndexBitwidth(), useAlignedAlloc,
-      options.dataLayout);
-}

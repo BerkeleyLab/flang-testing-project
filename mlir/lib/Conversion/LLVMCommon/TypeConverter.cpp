@@ -11,6 +11,7 @@
 #include "mlir/Conversion/LLVMCommon/MemRefBuilder.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
+#include <optional>
 
 using namespace mlir;
 
@@ -227,12 +228,11 @@ Type LLVMTypeConverter::convertFunctionSignature(
                               ? barePtrFuncArgTypeConverter
                               : structFuncArgTypeConverter;
   // Convert argument types one by one and check for errors.
-  for (auto &en : llvm::enumerate(funcTy.getInputs())) {
-    Type type = en.value();
+  for (auto [idx, type] : llvm::enumerate(funcTy.getInputs())) {
     SmallVector<Type, 8> converted;
     if (failed(funcArgConverter(*this, type, converted)))
       return {};
-    result.addInputs(en.index(), converted);
+    result.addInputs(idx, converted);
   }
 
   // If function does not return anything, create the void result type,
@@ -398,7 +398,7 @@ FailureOr<unsigned>
 LLVMTypeConverter::getMemRefAddressSpace(BaseMemRefType type) {
   if (!type.getMemorySpace()) // Default memory space -> 0.
     return 0;
-  Optional<Attribute> converted =
+  std::optional<Attribute> converted =
       convertTypeAttribute(type, type.getMemorySpace());
   if (!converted)
     return failure();

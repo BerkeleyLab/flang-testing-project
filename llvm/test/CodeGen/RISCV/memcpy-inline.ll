@@ -28,7 +28,7 @@ define i32 @t0() {
 ; RV32-NEXT:    lui a2, %hi(dst)
 ; RV32-NEXT:    sw a1, %lo(dst)(a2)
 ; RV32-NEXT:    addi a0, a0, %lo(src)
-; RV32-NEXT:    lb a1, 10(a0)
+; RV32-NEXT:    lbu a1, 10(a0)
 ; RV32-NEXT:    lh a3, 8(a0)
 ; RV32-NEXT:    lw a0, 4(a0)
 ; RV32-NEXT:    addi a2, a2, %lo(dst)
@@ -44,7 +44,7 @@ define i32 @t0() {
 ; RV64-NEXT:    ld a1, %lo(src)(a0)
 ; RV64-NEXT:    lui a2, %hi(dst)
 ; RV64-NEXT:    addi a0, a0, %lo(src)
-; RV64-NEXT:    lb a3, 10(a0)
+; RV64-NEXT:    lbu a3, 10(a0)
 ; RV64-NEXT:    lh a0, 8(a0)
 ; RV64-NEXT:    sd a1, %lo(dst)(a2)
 ; RV64-NEXT:    addi a1, a2, %lo(dst)
@@ -295,34 +295,49 @@ entry:
 }
 
 define void @t6() nounwind {
-; RV32-LABEL: t6:
-; RV32:       # %bb.0: # %entry
-; RV32-NEXT:    lui a0, %hi(spool.splbuf)
-; RV32-NEXT:    li a1, 88
-; RV32-NEXT:    sh a1, %lo(spool.splbuf+12)(a0)
-; RV32-NEXT:    lui a1, 361862
-; RV32-NEXT:    addi a1, a1, -1960
-; RV32-NEXT:    sw a1, %lo(spool.splbuf+8)(a0)
-; RV32-NEXT:    lui a1, 362199
-; RV32-NEXT:    addi a1, a1, 559
-; RV32-NEXT:    sw a1, %lo(spool.splbuf+4)(a0)
-; RV32-NEXT:    lui a1, 460503
-; RV32-NEXT:    addi a1, a1, 1071
-; RV32-NEXT:    sw a1, %lo(spool.splbuf)(a0)
-; RV32-NEXT:    ret
+; RV32ALIGNED-LABEL: t6:
+; RV32ALIGNED:       # %bb.0: # %entry
+; RV32ALIGNED-NEXT:    addi sp, sp, -16
+; RV32ALIGNED-NEXT:    sw ra, 12(sp) # 4-byte Folded Spill
+; RV32ALIGNED-NEXT:    lui a0, %hi(spool.splbuf)
+; RV32ALIGNED-NEXT:    addi a0, a0, %lo(spool.splbuf)
+; RV32ALIGNED-NEXT:    lui a1, %hi(.L.str6)
+; RV32ALIGNED-NEXT:    addi a1, a1, %lo(.L.str6)
+; RV32ALIGNED-NEXT:    li a2, 14
+; RV32ALIGNED-NEXT:    call memcpy@plt
+; RV32ALIGNED-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
+; RV32ALIGNED-NEXT:    addi sp, sp, 16
+; RV32ALIGNED-NEXT:    ret
 ;
 ; RV64ALIGNED-LABEL: t6:
 ; RV64ALIGNED:       # %bb.0: # %entry
+; RV64ALIGNED-NEXT:    addi sp, sp, -16
+; RV64ALIGNED-NEXT:    sd ra, 8(sp) # 8-byte Folded Spill
 ; RV64ALIGNED-NEXT:    lui a0, %hi(spool.splbuf)
-; RV64ALIGNED-NEXT:    li a1, 88
-; RV64ALIGNED-NEXT:    sh a1, %lo(spool.splbuf+12)(a0)
-; RV64ALIGNED-NEXT:    lui a1, %hi(.LCPI6_0)
-; RV64ALIGNED-NEXT:    ld a1, %lo(.LCPI6_0)(a1)
-; RV64ALIGNED-NEXT:    lui a2, 361862
-; RV64ALIGNED-NEXT:    addiw a2, a2, -1960
-; RV64ALIGNED-NEXT:    sw a2, %lo(spool.splbuf+8)(a0)
-; RV64ALIGNED-NEXT:    sd a1, %lo(spool.splbuf)(a0)
+; RV64ALIGNED-NEXT:    addi a0, a0, %lo(spool.splbuf)
+; RV64ALIGNED-NEXT:    lui a1, %hi(.L.str6)
+; RV64ALIGNED-NEXT:    addi a1, a1, %lo(.L.str6)
+; RV64ALIGNED-NEXT:    li a2, 14
+; RV64ALIGNED-NEXT:    call memcpy@plt
+; RV64ALIGNED-NEXT:    ld ra, 8(sp) # 8-byte Folded Reload
+; RV64ALIGNED-NEXT:    addi sp, sp, 16
 ; RV64ALIGNED-NEXT:    ret
+;
+; RV32UNALIGNED-LABEL: t6:
+; RV32UNALIGNED:       # %bb.0: # %entry
+; RV32UNALIGNED-NEXT:    lui a0, %hi(spool.splbuf)
+; RV32UNALIGNED-NEXT:    li a1, 88
+; RV32UNALIGNED-NEXT:    sh a1, %lo(spool.splbuf+12)(a0)
+; RV32UNALIGNED-NEXT:    lui a1, 361862
+; RV32UNALIGNED-NEXT:    addi a1, a1, -1960
+; RV32UNALIGNED-NEXT:    sw a1, %lo(spool.splbuf+8)(a0)
+; RV32UNALIGNED-NEXT:    lui a1, 362199
+; RV32UNALIGNED-NEXT:    addi a1, a1, 559
+; RV32UNALIGNED-NEXT:    sw a1, %lo(spool.splbuf+4)(a0)
+; RV32UNALIGNED-NEXT:    lui a1, 460503
+; RV32UNALIGNED-NEXT:    addi a1, a1, 1071
+; RV32UNALIGNED-NEXT:    sw a1, %lo(spool.splbuf)(a0)
+; RV32UNALIGNED-NEXT:    ret
 ;
 ; RV64UNALIGNED-LABEL: t6:
 ; RV64UNALIGNED:       # %bb.0: # %entry

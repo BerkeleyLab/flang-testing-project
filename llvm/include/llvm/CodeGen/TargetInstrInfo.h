@@ -61,6 +61,7 @@ class TargetRegisterInfo;
 class TargetSchedModel;
 class TargetSubtargetInfo;
 enum class MachineCombinerPattern;
+enum class MachineTraceStrategy;
 
 template <class T> class SmallVectorImpl;
 
@@ -1251,6 +1252,9 @@ public:
   /// Return true when a target supports MachineCombiner.
   virtual bool useMachineCombiner() const { return false; }
 
+  /// Return a strategy that MachineCombiner must use when creating traces.
+  virtual MachineTraceStrategy getMachineCombinerTraceStrategy() const;
+
   /// Return true if the given SDNode can be copied during scheduling
   /// even if it has glue.
   virtual bool canCopyGluedNodeDuringSchedule(SDNode *N) const { return false; }
@@ -1962,8 +1966,9 @@ public:
   }
 
   /// Returns a \p outliner::OutlinedFunction struct containing target-specific
-  /// information for a set of outlining candidates.
-  virtual outliner::OutlinedFunction getOutliningCandidateInfo(
+  /// information for a set of outlining candidates. Returns None if the
+  /// candidates are not suitable for outlining.
+  virtual std::optional<outliner::OutlinedFunction> getOutliningCandidateInfo(
       std::vector<outliner::Candidate> &RepeatedSequenceLocs) const {
     llvm_unreachable(
         "Target didn't implement TargetInstrInfo::getOutliningCandidateInfo!");

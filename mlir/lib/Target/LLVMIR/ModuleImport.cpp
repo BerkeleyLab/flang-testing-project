@@ -20,6 +20,7 @@
 
 #include "mlir/Dialect/DLTI/DLTI.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/Interfaces/DataLayoutInterfaces.h"
 #include "mlir/Tools/mlir-translate/Translation.h"
@@ -179,9 +180,10 @@ mlir::translateDataLayout(const llvm::DataLayout &dataLayout,
   // Remaining unhandled default layout defaults
   // e (little endian if not set)
   // p[n]:64:64:64 (non zero address spaces have 64-bit properties)
+  // Alloca address space defaults to 0.
   std::string append =
       "p:64:64:64-S0-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f16:16:16-f64:"
-      "64:64-f128:128:128-v64:64:64-v128:128:128-a:0:64";
+      "64:64-f128:128:128-v64:64:64-v128:128:128-a:0:64-A0";
   if (layoutstr.empty())
     layoutstr = append;
   else
@@ -227,6 +229,18 @@ mlir::translateDataLayout(const llvm::DataLayout &dataLayout,
           StringAttr::get(context, DLTIDialect::kDataLayoutEndiannessKey),
           value);
       entries.emplace_back(entry);
+    } else if (symbol == 'A') {
+      unsigned addressSpace;
+      if (parameter.getAsInteger(/*Radix=*/10, addressSpace))
+        return nullptr;
+      // Skip storing if generic address space is defined.
+      if (addressSpace != 0) {
+        auto entry = DataLayoutEntryAttr::get(
+            StringAttr::get(context,
+                            DLTIDialect::kDataLayoutAllocaMemorySpaceKey),
+            mlir::Builder(context).getUI32IntegerAttr(addressSpace));
+        entries.emplace_back(entry);
+      }
     }
   }
 
@@ -521,6 +535,99 @@ ModuleImport::processAccessGroupMetadata(const llvm::MDNode *node) {
   return success();
 }
 
+LogicalResult
+ModuleImport::processAliasScopeMetadata(const llvm::MDNode *node) {
+  Location loc = mlirModule.getLoc();
+  // Helper that verifies the node has a self reference operand.
+  auto verifySelfRef = [](const llvm::MDNode *node) {
+    return node->getNumOperands() != 0 &&
+           node == dyn_cast<llvm::MDNode>(node->getOperand(0));
+  };
+  // Helper that verifies the given operand is a string or does not exist.
+  auto verifyDescription = [](const llvm::MDNode *node, unsigned idx) {
+    return idx >= node->getNumOperands() ||
+           isa<llvm::MDString>(node->getOperand(idx));
+  };
+  // Helper that creates an alias scope domain operation.
+  auto createAliasScopeDomainOp = [&](const llvm::MDNode *aliasDomain) {
+    StringAttr description = nullptr;
+    if (aliasDomain->getNumOperands() >= 2)
+      if (auto *operand = dyn_cast<llvm::MDString>(aliasDomain->getOperand(1)))
+        description = builder.getStringAttr(operand->getString());
+    std::string name = llvm::formatv("domain_{0}", aliasScopeMapping.size());
+    return builder.create<AliasScopeDomainMetadataOp>(loc, name, description);
+  };
+
+  // Collect the alias scopes and domains to translate them.
+  for (const llvm::MDOperand &operand : node->operands()) {
+    if (const auto *scope = dyn_cast<llvm::MDNode>(operand)) {
+      llvm::AliasScopeNode aliasScope(scope);
+      const llvm::MDNode *domain = aliasScope.getDomain();
+
+      // Verify the scope node points to valid scope metadata which includes
+      // verifying its domain. Perform the verification before looking it up in
+      // the alias scope mapping since it could have been inserted as a domain
+      // node before.
+      if (!verifySelfRef(scope) || !domain || !verifyDescription(scope, 2))
+        return emitError(loc) << "unsupported alias scope node: "
+                              << diagMD(scope, llvmModule.get());
+      if (!verifySelfRef(domain) || !verifyDescription(domain, 1))
+        return emitError(loc) << "unsupported alias domain node: "
+                              << diagMD(domain, llvmModule.get());
+
+      if (aliasScopeMapping.count(scope))
+        continue;
+
+      // Set the insertion point to the end of the global metadata operation.
+      MetadataOp metadataOp = getGlobalMetadataOp();
+      StringAttr metadataOpName =
+          SymbolTable::getSymbolName(getGlobalMetadataOp());
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPointToEnd(&metadataOp.getBody().back());
+
+      // Convert the domain metadata node if it has not been translated before.
+      auto it = aliasScopeMapping.find(aliasScope.getDomain());
+      if (it == aliasScopeMapping.end()) {
+        auto aliasScopeDomainOp = createAliasScopeDomainOp(domain);
+        auto symbolRef = SymbolRefAttr::get(
+            builder.getContext(), metadataOpName,
+            FlatSymbolRefAttr::get(builder.getContext(),
+                                   aliasScopeDomainOp.getSymName()));
+        it = aliasScopeMapping.try_emplace(domain, symbolRef).first;
+      }
+
+      // Convert the scope metadata node if it has not been converted before.
+      StringAttr description = nullptr;
+      if (!aliasScope.getName().empty())
+        description = builder.getStringAttr(aliasScope.getName());
+      std::string name = llvm::formatv("scope_{0}", aliasScopeMapping.size());
+      auto aliasScopeOp = builder.create<AliasScopeMetadataOp>(
+          loc, name, it->getSecond().getLeafReference().getValue(),
+          description);
+      auto symbolRef =
+          SymbolRefAttr::get(builder.getContext(), metadataOpName,
+                             FlatSymbolRefAttr::get(builder.getContext(),
+                                                    aliasScopeOp.getSymName()));
+      aliasScopeMapping.try_emplace(aliasScope.getNode(), symbolRef);
+    }
+  }
+  return success();
+}
+
+FailureOr<SmallVector<SymbolRefAttr>>
+ModuleImport::lookupAliasScopeAttrs(const llvm::MDNode *node) const {
+  SmallVector<SymbolRefAttr> aliasScopes;
+  aliasScopes.reserve(node->getNumOperands());
+  for (const llvm::MDOperand &operand : node->operands()) {
+    auto *node = cast<llvm::MDNode>(operand.get());
+    aliasScopes.push_back(aliasScopeMapping.lookup(node));
+  }
+  // Return failure if one of the alias scope lookups failed.
+  if (llvm::is_contained(aliasScopes, nullptr))
+    return failure();
+  return aliasScopes;
+}
+
 LogicalResult ModuleImport::convertMetadata() {
   OpBuilder::InsertionGuard guard(builder);
   builder.setInsertionPointToEnd(mlirModule.getBody());
@@ -539,8 +646,12 @@ LogicalResult ModuleImport::convertMetadata() {
       if (aliasAnalysisNodes.TBAA)
         if (failed(processTBAAMetadata(aliasAnalysisNodes.TBAA)))
           return failure();
-
-      // TODO: Support noalias and scope metadata nodes.
+      if (aliasAnalysisNodes.Scope)
+        if (failed(processAliasScopeMetadata(aliasAnalysisNodes.Scope)))
+          return failure();
+      if (aliasAnalysisNodes.NoAlias)
+        if (failed(processAliasScopeMetadata(aliasAnalysisNodes.NoAlias)))
+          return failure();
     }
   }
   return success();
@@ -796,6 +907,8 @@ LogicalResult ModuleImport::convertGlobal(llvm::GlobalVariable *globalVar) {
   }
   if (globalVar->hasSection())
     globalOp.setSection(globalVar->getSection());
+  globalOp.setVisibility_(
+      convertVisibilityFromLLVM(globalVar->getVisibility()));
 
   return success();
 }
@@ -945,7 +1058,7 @@ FailureOr<Value> ModuleImport::convertConstant(llvm::Constant *constant) {
     // resulting in a conflicting `valueMapping` entry.
     llvm::Instruction *inst = constExpr->getAsInstruction();
     auto guard = llvm::make_scope_exit([&]() {
-      assert(noResultOpMapping.find(inst) == noResultOpMapping.end() &&
+      assert(!noResultOpMapping.contains(inst) &&
              "expected constant expression to return a result");
       valueMapping.erase(inst);
       inst->deleteValue();
@@ -1035,11 +1148,8 @@ FailureOr<Value> ModuleImport::convertConstantExpr(llvm::Constant *constant) {
 }
 
 FailureOr<Value> ModuleImport::convertValue(llvm::Value *value) {
-  // A value may be wrapped as metadata, for example, when passed to a debug
-  // intrinsic. Unwrap these values before the conversion.
-  if (auto *nodeAsVal = dyn_cast<llvm::MetadataAsValue>(value))
-    if (auto *node = dyn_cast<llvm::ValueAsMetadata>(nodeAsVal->getMetadata()))
-      value = node->getValue();
+  assert(!isa<llvm::MetadataAsValue>(value) &&
+         "expected value to not be metadata");
 
   // Return the mapped value if it has been converted before.
   if (valueMapping.count(value))
@@ -1053,6 +1163,27 @@ FailureOr<Value> ModuleImport::convertValue(llvm::Value *value) {
   if (auto *inst = dyn_cast<llvm::Instruction>(value))
     loc = translateLoc(inst->getDebugLoc());
   return emitError(loc) << "unhandled value: " << diag(*value);
+}
+
+FailureOr<Value> ModuleImport::convertMetadataValue(llvm::Value *value) {
+  // A value may be wrapped as metadata, for example, when passed to a debug
+  // intrinsic. Unwrap these values before the conversion.
+  auto *nodeAsVal = dyn_cast<llvm::MetadataAsValue>(value);
+  if (!nodeAsVal)
+    return failure();
+  auto *node = dyn_cast<llvm::ValueAsMetadata>(nodeAsVal->getMetadata());
+  if (!node)
+    return failure();
+  value = node->getValue();
+
+  // Return the mapped value if it has been converted before.
+  if (valueMapping.count(value))
+    return lookupValue(value);
+
+  // Convert constants such as immediate values that have no mapping yet.
+  if (auto *constant = dyn_cast<llvm::Constant>(value))
+    return convertConstantExpr(constant);
+  return failure();
 }
 
 FailureOr<SmallVector<Value>>
@@ -1082,6 +1213,13 @@ DILocalVariableAttr ModuleImport::matchLocalVariableAttr(llvm::Value *value) {
   auto *nodeAsVal = cast<llvm::MetadataAsValue>(value);
   auto *node = cast<llvm::DILocalVariable>(nodeAsVal->getMetadata());
   return debugImporter->translate(node);
+}
+
+FailureOr<SmallVector<SymbolRefAttr>>
+ModuleImport::matchAliasScopeAttrs(llvm::Value *value) {
+  auto *nodeAsVal = cast<llvm::MetadataAsValue>(value);
+  auto *node = cast<llvm::MDNode>(nodeAsVal->getMetadata());
+  return lookupAliasScopeAttrs(node);
 }
 
 Location ModuleImport::translateLoc(llvm::DILocation *loc) {
@@ -1495,6 +1633,8 @@ LogicalResult ModuleImport::processFunction(llvm::Function *func) {
 
   if (func->hasGC())
     funcOp.setGarbageCollector(StringRef(func->getGC()));
+
+  funcOp.setVisibility_(convertVisibilityFromLLVM(func->getVisibility()));
 
   // Handle Function attributes.
   processFunctionAttributes(func, funcOp);

@@ -51,8 +51,12 @@ public:
 
   unsigned isLoadFromStackSlot(const MachineInstr &MI,
                                int &FrameIndex) const override;
+  unsigned isLoadFromStackSlot(const MachineInstr &MI, int &FrameIndex,
+                               unsigned &MemBytes) const override;
   unsigned isStoreToStackSlot(const MachineInstr &MI,
                               int &FrameIndex) const override;
+  unsigned isStoreToStackSlot(const MachineInstr &MI, int &FrameIndex,
+                              unsigned &MemBytes) const override;
 
   void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                    const DebugLoc &DL, MCRegister DstReg, MCRegister SrcReg,
@@ -155,7 +159,7 @@ public:
   bool shouldOutlineFromFunctionByDefault(MachineFunction &MF) const override;
 
   // Calculate target-specific information for a set of outlining candidates.
-  outliner::OutlinedFunction getOutliningCandidateInfo(
+  std::optional<outliner::OutlinedFunction> getOutliningCandidateInfo(
       std::vector<outliner::Candidate> &RepeatedSequenceLocs) const override;
 
   // Return if/how a given MachineInstr should be outlined.
@@ -194,6 +198,8 @@ public:
       int64_t Amount, MachineInstr::MIFlag Flag = MachineInstr::NoFlags) const;
 
   bool useMachineCombiner() const override { return true; }
+
+  MachineTraceStrategy getMachineCombinerTraceStrategy() const override;
 
   void setSpecialOperandAttr(MachineInstr &OldMI1, MachineInstr &OldMI2,
                              MachineInstr &NewMI1,

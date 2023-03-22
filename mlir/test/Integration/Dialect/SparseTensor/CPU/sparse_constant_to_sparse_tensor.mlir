@@ -2,7 +2,7 @@
 // DEFINE: %{compile} = mlir-opt %s --sparse-compiler=%{option}
 // DEFINE: %{run} = mlir-cpu-runner \
 // DEFINE:  -e entry -entry-point-result=void  \
-// DEFINE:  -shared-libs=%mlir_lib_dir/libmlir_c_runner_utils%shlibext | \
+// DEFINE:  -shared-libs=%mlir_c_runner_utils | \
 // DEFINE: FileCheck %s
 //
 // RUN: %{compile} | %{run}
@@ -48,12 +48,12 @@ module {
     %ts = sparse_tensor.convert %ti : tensor<10x8xf64> to tensor<10x8xf64, #Tensor1>
 
     // CHECK: ( 0, 1, 4, 5, 6, 9 )
-    %i0 = sparse_tensor.indices %ts { dimension = 0 : index } : tensor<10x8xf64, #Tensor1> to memref<?xindex>
+    %i0 = sparse_tensor.coordinates %ts { level = 0 : index } : tensor<10x8xf64, #Tensor1> to memref<?xindex>
     %i0r = vector.transfer_read %i0[%c0], %c0: memref<?xindex>, vector<6xindex>
     vector.print %i0r : vector<6xindex>
 
     // CHECK: ( 0, 7, 2, 2, 3, 4, 6, 7 )
-    %i1 = sparse_tensor.indices %ts { dimension = 1 : index } : tensor<10x8xf64, #Tensor1> to memref<?xindex>
+    %i1 = sparse_tensor.coordinates %ts { level = 1 : index } : tensor<10x8xf64, #Tensor1> to memref<?xindex>
     %i1r = vector.transfer_read %i1[%c0], %c0: memref<?xindex>, vector<8xindex>
     vector.print %i1r : vector<8xindex>
 

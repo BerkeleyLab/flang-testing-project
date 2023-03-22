@@ -139,9 +139,40 @@ struct PackOpInterface
                                             const AnalysisState &state) const {
     assert(op->getNumResults() == 1);
     assert(isUniqueCOOType(op->getResultTypes()[0].cast<RankedTensorType>()));
-    // PackOp reuses the input tensors as data/indices instead of creating new
-    // ones when packing into a COO format.
+    // PackOp reuses the input tensors as values/coordinates instead of
+    // creating new ones when packing into a COO format.
     return {{op->getOpResult(0), BufferRelation::Equivalent}};
+  }
+
+  BufferRelation bufferRelation(Operation *oo, OpResult opResult,
+                                const AnalysisState &state) const {
+    return BufferRelation::Unknown;
+  }
+};
+
+struct UnpackOpInterface
+    : public BufferizableOpInterface::ExternalModel<UnpackOpInterface,
+                                                    sparse_tensor::UnpackOp> {
+  bool bufferizesToAllocation(Operation *op, OpResult opResult) const {
+    // Similar to InsertOp, reallocation is not considered to allocate a new
+    // piece of memory.
+    return false;
+  }
+
+  bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand,
+                              const AnalysisState &state) const {
+    return true;
+  }
+
+  bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
+                               const AnalysisState &state) const {
+    return false;
+  }
+
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
+                                            const AnalysisState &state) const {
+    // Conceptually, UnpackOp equals to a list of toCoordinates/toValueOp
+    return {};
   }
 };
 
@@ -186,9 +217,10 @@ struct NumberOfEntriesOpInterface
   }
 };
 
-struct ToIndicesBufferOpInterface
+struct ToCoordinatesBufferOpInterface
     : public BufferizableOpInterface::ExternalModel<
-          ToIndicesBufferOpInterface, sparse_tensor::ToIndicesBufferOp> {
+          ToCoordinatesBufferOpInterface,
+          sparse_tensor::ToCoordinatesBufferOp> {
   bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand,
                               const AnalysisState &state) const {
     return true;
@@ -196,8 +228,8 @@ struct ToIndicesBufferOpInterface
 
   bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
                                const AnalysisState &state) const {
-    // Potential writes into memory through the result of sparse_tensor.indices
-    // are not considered.
+    // Potential writes into memory through the result of
+    // `sparse_tensor.coordinates` are not considered.
     return false;
   }
 
@@ -207,9 +239,9 @@ struct ToIndicesBufferOpInterface
   }
 };
 
-struct ToIndicesOpInterface
+struct ToCoordinatesOpInterface
     : public BufferizableOpInterface::ExternalModel<
-          ToIndicesOpInterface, sparse_tensor::ToIndicesOp> {
+          ToCoordinatesOpInterface, sparse_tensor::ToCoordinatesOp> {
   bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand,
                               const AnalysisState &state) const {
     return true;
@@ -217,8 +249,8 @@ struct ToIndicesOpInterface
 
   bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
                                const AnalysisState &state) const {
-    // Potential writes into memory through the result of sparse_tensor.indices
-    // are not considered.
+    // Potential writes into memory through the result of
+    // `sparse_tensor.coordinates` are not considered.
     return false;
   }
 
@@ -228,9 +260,9 @@ struct ToIndicesOpInterface
   }
 };
 
-struct ToPointersOpInterface
+struct ToPositionsOpInterface
     : public BufferizableOpInterface::ExternalModel<
-          ToPointersOpInterface, sparse_tensor::ToPointersOp> {
+          ToPositionsOpInterface, sparse_tensor::ToPositionsOp> {
   bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand,
                               const AnalysisState &state) const {
     return true;
@@ -238,8 +270,8 @@ struct ToPointersOpInterface
 
   bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
                                const AnalysisState &state) const {
-    // Potential writes into memory through the result of sparse_tensor.pointers
-    // are not considered.
+    // Potential writes into memory through the result of
+    // `sparse_tensor.positions` are not considered.
     return false;
   }
 
@@ -285,10 +317,13 @@ void mlir::sparse_tensor::registerBufferizableOpInterfaceExternalModels(
     sparse_tensor::InsertOp::attachInterface<InsertOpInterface>(*ctx);
     sparse_tensor::NumberOfEntriesOp::attachInterface<
         NumberOfEntriesOpInterface>(*ctx);
-    sparse_tensor::ToIndicesBufferOp::attachInterface<
-        ToIndicesBufferOpInterface>(*ctx);
-    sparse_tensor::ToIndicesOp::attachInterface<ToIndicesOpInterface>(*ctx);
-    sparse_tensor::ToPointersOp::attachInterface<ToPointersOpInterface>(*ctx);
+    sparse_tensor::PackOp::attachInterface<PackOpInterface>(*ctx);
+    sparse_tensor::UnpackOp::attachInterface<UnpackOpInterface>(*ctx);
+    sparse_tensor::ToCoordinatesBufferOp::attachInterface<
+        ToCoordinatesBufferOpInterface>(*ctx);
+    sparse_tensor::ToCoordinatesOp::attachInterface<ToCoordinatesOpInterface>(
+        *ctx);
+    sparse_tensor::ToPositionsOp::attachInterface<ToPositionsOpInterface>(*ctx);
     sparse_tensor::ToValuesOp::attachInterface<ToValuesOpInterface>(*ctx);
   });
 }

@@ -378,7 +378,6 @@ checkTilingLegalityImpl(MutableArrayRef<mlir::AffineForOp> origLoops) {
 
   unsigned numOps = loadAndStoreOps.size();
   unsigned numLoops = origLoops.size();
-  FlatAffineValueConstraints dependenceConstraints;
   for (unsigned d = 1; d <= numLoops + 1; ++d) {
     for (unsigned i = 0; i < numOps; ++i) {
       Operation *srcOp = loadAndStoreOps[i];
@@ -388,9 +387,9 @@ checkTilingLegalityImpl(MutableArrayRef<mlir::AffineForOp> origLoops) {
         MemRefAccess dstAccess(dstOp);
 
         SmallVector<DependenceComponent, 2> depComps;
-        dependenceConstraints.reset();
         DependenceResult result = checkMemrefAccessDependence(
-            srcAccess, dstAccess, d, &dependenceConstraints, &depComps);
+            srcAccess, dstAccess, d, /*dependenceConstraints=*/nullptr,
+            &depComps);
 
         // Skip if there is no dependence in this case.
         if (!hasDependence(result))
@@ -2182,7 +2181,11 @@ static LogicalResult generateCopy(
     // Record it.
     fastBufferMap[memref] = fastMemRef;
     // fastMemRefType is a constant shaped memref.
-    *sizeInBytes = *getMemRefSizeInBytes(fastMemRefType);
+    auto maySizeInBytes = getIntOrFloatMemRefSizeInBytes(fastMemRefType);
+    // We don't account for things of unknown size.
+    if (!maySizeInBytes)
+      maySizeInBytes = 0;
+
     LLVM_DEBUG(emitRemarkForBlock(*block)
                << "Creating fast buffer of type " << fastMemRefType
                << " and size " << llvm::divideCeil(*sizeInBytes, 1024)
@@ -2362,7 +2365,7 @@ static bool getFullMemRefAsRegion(Operation *op, unsigned numParamLoopIVs,
   ivs.resize(numParamLoopIVs);
   SmallVector<Value, 4> symbols;
   extractForInductionVars(ivs, &symbols);
-  regionCst->reset(rank, numParamLoopIVs, 0);
+  *regionCst = FlatAffineValueConstraints(rank, numParamLoopIVs, 0);
   regionCst->setValues(rank, rank + numParamLoopIVs, symbols);
 
   // Memref dim sizes provide the bounds.

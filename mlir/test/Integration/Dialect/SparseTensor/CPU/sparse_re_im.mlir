@@ -2,7 +2,7 @@
 // DEFINE: %{compile} = mlir-opt %s --sparse-compiler=%{option}
 // DEFINE: %{run} = mlir-cpu-runner \
 // DEFINE:  -e entry -entry-point-result=void  \
-// DEFINE:  -shared-libs=%mlir_lib_dir/libmlir_c_runner_utils%shlibext | \
+// DEFINE:  -shared-libs=%mlir_c_runner_utils | \
 // DEFINE: FileCheck %s
 //
 // RUN: %{compile} | %{run}
@@ -76,8 +76,8 @@ module {
     %values = sparse_tensor.values %arg0 : tensor<?xf32, #SparseVector> to memref<?xf32>
     %0 = vector.transfer_read %values[%c0], %d0: memref<?xf32>, vector<3xf32>
     vector.print %0 : vector<3xf32>
-    %indices = sparse_tensor.indices %arg0 { dimension = 0 : index } : tensor<?xf32, #SparseVector> to memref<?xindex>
-    %1 = vector.transfer_read %indices[%c0], %c0: memref<?xindex>, vector<3xindex>
+    %coordinates = sparse_tensor.coordinates %arg0 { level = 0 : index } : tensor<?xf32, #SparseVector> to memref<?xindex>
+    %1 = vector.transfer_read %coordinates[%c0], %c0: memref<?xindex>, vector<3xindex>
     vector.print %1 : vector<3xindex>
     return
   }

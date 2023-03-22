@@ -74,7 +74,7 @@
 
 #include "GDBRemoteRegisterContext.h"
 #include "GDBRemoteRegisterFallback.h"
-#include "Plugins/Process/Utility/GDBRemoteSignals.h"
+#include "Plugins/Platform/gdb-server/GDBRemoteSignals.h"
 #include "Plugins/Process/Utility/InferiorCallPOSIX.h"
 #include "Plugins/Process/Utility/StopInfoMachException.h"
 #include "ProcessGDBRemote.h"
@@ -967,15 +967,13 @@ void ProcessGDBRemote::DidLaunchOrAttach(ArchSpec &process_arch) {
     MapSupportedStructuredDataPlugins(*supported_packets);
 
   // If connected to LLDB ("native-signals+"), use signal defs for
-  // the remote platform.  If connected to GDB, just use the standard set.
-  if (!m_gdb_comm.UsesNativeSignals()) {
+  // the remote platform (assuming it's available).  If connected to GDB, just
+  // use the standard set.
+  auto platform_sp = GetTarget().GetPlatform();
+  if (!platform_sp || !m_gdb_comm.UsesNativeSignals())
     SetUnixSignals(std::make_shared<GDBRemoteSignals>());
-  } else {
-    PlatformSP platform_sp = GetTarget().GetPlatform();
-    if (platform_sp && platform_sp->IsConnected())
-      SetUnixSignals(platform_sp->GetUnixSignals());
-    else
-      SetUnixSignals(UnixSignals::Create(GetTarget().GetArchitecture()));
+  else {
+    SetUnixSignals(platform_sp->GetUnixSignals());
   }
 }
 
@@ -2818,16 +2816,12 @@ Status ProcessGDBRemote::DoGetMemoryRegionInfo(addr_t load_addr,
   return error;
 }
 
-Status ProcessGDBRemote::GetWatchpointSupportInfo(uint32_t &num) {
-
-  Status error(m_gdb_comm.GetWatchpointSupportInfo(num));
-  return error;
+std::optional<uint32_t> ProcessGDBRemote::GetWatchpointSlotCount() {
+  return m_gdb_comm.GetWatchpointSlotCount();
 }
 
-Status ProcessGDBRemote::GetWatchpointSupportInfo(uint32_t &num, bool &after) {
-  Status error(m_gdb_comm.GetWatchpointSupportInfo(
-      num, after, GetTarget().GetArchitecture()));
-  return error;
+std::optional<bool> ProcessGDBRemote::DoGetWatchpointReportedAfter() {
+  return m_gdb_comm.GetWatchpointReportedAfter();
 }
 
 Status ProcessGDBRemote::DoDeallocateMemory(lldb::addr_t addr) {

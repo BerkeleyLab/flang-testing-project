@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PlatformFreeBSD.h"
+#include "FreeBSDSignals.h"
 #include "lldb/Host/Config.h"
 
 #include <cstdio>
@@ -28,7 +29,7 @@
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StreamString.h"
 
-#include "llvm/Support/Host.h"
+#include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 
 // Define these constants from FreeBSD mman.h for use when targeting remote
@@ -281,4 +282,8 @@ CompilerType PlatformFreeBSD::GetSiginfoType(const llvm::Triple &triple) {
 
   ast->CompleteTagDeclarationDefinition(siginfo_type);
   return siginfo_type;
+}
+
+lldb::UnixSignalsSP PlatformFreeBSD::CreateUnixSignals() {
+  return std::make_shared<FreeBSDSignals>();
 }

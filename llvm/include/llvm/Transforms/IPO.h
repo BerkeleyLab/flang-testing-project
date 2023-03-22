@@ -28,40 +28,6 @@ class GlobalValue;
 class raw_ostream;
 
 //===----------------------------------------------------------------------===//
-//
-// This pass adds !annotation metadata to entries in the
-// @llvm.global.annotations global constant.
-//
-ModulePass *createAnnotation2MetadataLegacyPass();
-
-//===----------------------------------------------------------------------===//
-/// createConstantMergePass - This function returns a new pass that merges
-/// duplicate global constants together into a single constant that is shared.
-/// This is useful because some passes (ie TraceValues) insert a lot of string
-/// constants into the program, regardless of whether or not they duplicate an
-/// existing string.
-///
-ModulePass *createConstantMergePass();
-
-//===----------------------------------------------------------------------===//
-/// createGlobalOptimizerPass - This function returns a new pass that optimizes
-/// non-address taken internal globals.
-///
-ModulePass *createGlobalOptimizerPass();
-
-//===----------------------------------------------------------------------===//
-/// createGlobalDCEPass - This transform is designed to eliminate unreachable
-/// internal globals (functions or global variables)
-///
-ModulePass *createGlobalDCEPass();
-
-//===----------------------------------------------------------------------===//
-/// This transform is designed to eliminate available external globals
-/// (functions or global variables)
-///
-ModulePass *createEliminateAvailableExternallyPass();
-
-//===----------------------------------------------------------------------===//
 /// createGVExtractionPass - If deleteFn is true, this pass deletes
 /// the specified global values. Otherwise, it deletes as much of the module as
 /// possible, except for the global values specified. If keepConstInit is true,
@@ -81,13 +47,6 @@ ModulePass *createDeadArgEliminationPass();
 /// functions as well.  This is definitely not safe, and should only be used by
 /// bugpoint.
 ModulePass *createDeadArgHackingPass();
-
-//===----------------------------------------------------------------------===//
-/// createIPSCCPPass - This pass propagates constants from call sites into the
-/// bodies of functions, and keeps track of whether basic blocks are executable
-/// in the process.
-///
-ModulePass *createIPSCCPPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -112,13 +71,6 @@ enum class PassSummaryAction {
   Import, ///< Import information from summary.
   Export, ///< Export information to summary.
 };
-
-/// This pass export CFI checks for use by external modules.
-ModulePass *createCrossDSOCFIPass();
-
-/// This pass splits globals into pieces for the benefit of whole-program
-/// devirtualization and control-flow integrity.
-ModulePass *createGlobalSplitPass();
 
 } // End llvm namespace
 
