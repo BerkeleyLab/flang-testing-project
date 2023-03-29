@@ -43,7 +43,7 @@ One consequence of the statements being categorized as image control statements 
 
 ## Coarray Fortran (CAF) Parallel Runtime Interface
 
-  The Coarray Fortran Parallel Runtime Interface is a proposed interface in which the runtime library is responsible for coarray allocation, deallocation and accesses, image synchronization, atomic operations, events, and teams. In this interface, the compiler is responsible for transforming the source code to add Fortran procedure calls to the necessary runtime library procedures. Below you can find a table showing the delegation of tasks between the compiler and the runtime library. The interface is designed for portability across shared and distributed memory machines, different operating systems, and multiple architectures. The Caffeine implementation, [see below](#caffeine-lbl's-implementation-of-the-coarray-fortran-parallel-runtime-interface), of the Coarray Fortran Parallel Runtime Interface plans to support the following architectures: x86_64, PowerPC64, AArch64, with the possibility of supporting more as requested. Implementations of this interface is intended as an augmentation for the compiler's own runtime library. While the interface can support multiple implementations, we envision needing to build the runtime library as part of installing the compiler.
+  The Coarray Fortran Parallel Runtime Interface is a proposed interface in which the runtime library is responsible for coarray allocation, deallocation and accesses, image synchronization, atomic operations, events, and teams. In this interface, the compiler is responsible for transforming the source code to add Fortran procedure calls to the necessary runtime library procedures. Below you can find a table showing the delegation of tasks between the compiler and the runtime library. The interface is designed for portability across shared and distributed memory machines, different operating systems, and multiple architectures. The Caffeine implementation, [see below](#caffeine-lbl's-implementation-of-the-coarray-fortran-parallel-runtime-interface), of the Coarray Fortran Parallel Runtime Interface plans to support the following architectures: x86_64, PowerPC64, AArch64, with the possibility of supporting more as requested. Implementations of this interface is intended as an augmentation for the compiler's own runtime library. While the interface can support multiple implementations, we envision needing to build the runtime library as part of installing the compiler. REMOVE_NOTE_TODO: write sentence about how a module will be defined with the procedures. name of module must be: caf_pri.
 
 ## Delegation of tasks between the Fortran compiler and the runtime library
 
@@ -255,8 +255,9 @@ The following table outlines which tasks will be the responsibility of the Fortr
     ```
   * **Result**: `exit_code` is an `integer` whose value ... (REMOVE_NOTE_TODO: fill in)
 
+  REMOVE_NOTE: remove caf_finalize, because it has been determined that it iss redundant with caf_stop
  #### `caf_finalize`
-  * **Description**: This procedure will terminate the Coarray Fortran environment.
+  * **Description**: This procedure may or may terminate the Coarray Fortran environment. REMOVE_NOTE_TODO_DECISION: does it terminate for sure or not? can caf_init be called twice?
   * **Procedure Interface**:
     ```
       subroutine caf_finalize(exit_code)
@@ -294,6 +295,8 @@ The following table outlines which tasks will be the responsibility of the Fortr
     ```
   * **Further argument descriptions**:
     * **`stop_code_int` and `stop_code_char`**: shall not both be present in the same call (if provide only one procedure instead of overloading caf_stop)
+          * In `caf_stop`, runtime library will need to call c_exit() REMOVE_NOTE_TODO: fix this note
+
 
  #### `caf_fail_image`
   * **Description**:
@@ -313,10 +316,11 @@ The following table outlines which tasks will be the responsibility of the Fortr
     ```
       subroutine caf_allocate(co_lbounds, co_ubounds, lbounds, ubounds, coarray_handle, local_slice)
         implicit none
-        integer, kind(c_intmax_t), dimension(:), intent(in) :: co_lbounds, co_ubounds
-        integer, kind(c_intmax_t), dimension(:), intent(in) :: lbounds, ubounds
+        integer(kind=c_intmax_t), dimension(:), intent(in) :: co_lbounds, co_ubounds
+        integer(kind=c_intmax_t), dimension(:), intent(in) :: lbounds, ubounds
         type(caf_co_handle_t), intent(out) :: coarray_handle
-        type(*), dimension(..), allocatable, intent(out) :: local_slice
+        ! type(*), dimension(..), allocatable, intent(out) :: local_slice ! REMOVE_NOTE: when testing this interface out, didn't compile because `Assumed-type variable local_slice at (1) may not have the ALLOCATABLE, CODIMENSION, POINTER or VALUE attribute`
+        class(*), dimension(..), allocatable, intent(out) :: local_slice
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -356,7 +360,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
     * Argument for [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
     * assumed-rank array of `type(*)`
     * is (REMOVE_NOTE_TODO: fill in)
-  * **`source`**
+  * **`mold`**
     * Argument for [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
     * assumed-rank array of `type(*)`
     * is (REMOVE_NOTE_TODO: fill in)
@@ -369,11 +373,11 @@ The following table outlines which tasks will be the responsibility of the Fortr
   * **Description**: This procedure assigns to a coarray. The compiler shall call this procedure when there is a coarray reference that is a `coindexed-object`. The compiler shall not (REMOVE_NOTE: need to?) call this procedure when the coarray reference is not a `coindexed-object`. This procedure blocks on local completion. (REMOVE_NOTE: eventually would like a caf_put that doesn't block on local completion).
   * **Procedure Interface**:
     ```
-      subroutine caf_put(coarray_handle, coindices, target, value, team, team_number, stat)
+      subroutine caf_put(coarray_handle, coindices, mold, value, team, team_number, stat) !REMOVE_NOTE_TODO: make sure rename of target dummy arg to mold is changed in other places in doc as well
         implicit none
         type(caf_co_handle_t), intent(in) :: coarray_handle
         integer, intent(in) :: coindices(:)
-        type(*), dimension(..), intent(in) :: target, value
+        type(*), dimension(..), intent(in) :: mold, value
         type(team_type), optional, intent(in) :: team
         integer, optional, intent(in) :: team_number
         integer, optional, intent(out) :: stat
@@ -387,11 +391,11 @@ The following table outlines which tasks will be the responsibility of the Fortr
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_get(coarray_handle, coindices, source, value, team, team_number, stat)
+      subroutine caf_get(coarray_handle, coindices, mold, value, team, team_number, stat)
         implicit none
         type(caf_co_handle_t), intent(in) :: coarray_handle
         integer, intent(in) :: coindices(:)
-        type(*), dimension(..), intent(in) :: source
+        type(*), dimension(..), intent(in) :: mold
         type(*), dimension(..), intent(inout) :: value
         type(team_type), optional, intent(in) :: team
         integer, optional, intent(in) :: team_number
@@ -403,11 +407,11 @@ The following table outlines which tasks will be the responsibility of the Fortr
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_get_async(coarray_handle, coindices, source, value, async_handle, team, team_number, stat)
+      subroutine caf_get_async(coarray_handle, coindices, mold, value, async_handle, team, team_number, stat)
         implicit none
         type(caf_co_handle_t),  intent(in) :: coarray_handle
         integer, dimension(:),  intent(in) :: coindices
-        type(*), dimension(..), intent(in) :: source
+        type(*), dimension(..), intent(in) :: mold
         type(*), dimension(..), intent(inout) :: value
         type(caf_async_handle_t), intent(out) :: async_handle
         type(team_type), optional, intent(in) :: team
@@ -824,9 +828,9 @@ All atomic operations are blocking operations.
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_this_image(fill in...)
+      function caf_this_image(fill in...)
         implicit none
-      end subroutine
+      end function
     ```
   * **Further argument descriptions**:
 
@@ -953,6 +957,28 @@ TODO after writing example, try compiling it and see if it compiles at least unt
 3. implicit deallocation of a coarray example
     - local, allocatable coarray -> compiler must insert caf_deallocate call
     - have multiple coarrays, with only one call to caf_deallocate since it takes an array of handles
+
+4. example with coarray initializer to express the idea written earlier that compiler is reponsible for this
+
+5. include somewhere in examples
+  ! integer :: example[2:4,3:*]
+  ! integer :: example[3:*]
+
+
+
+REMOVE_NOTE_TODO: FIX CAF_ALLOCATE LINK
+
+CAF_ALLOCATE implementation notes:
+  ! figure out how much space it needs, c_size_of
+  ! internally consult its own allocater
+  ! will know the memory address
+  ! associate the allocatable local slice with the local memory
+  ! once caf_allocate returns, example_local_slice will refer to the local slice of the coarray that is in the shared heap
+  ! create meta data block that contains info about a given coarray, stash away the cobounds
+
+
+UNIT TESTS TODOs
+  unit test with user code tries to directly call caf_{...} procedures, should be possible for user to do so
 
 flexible array member in c
 
