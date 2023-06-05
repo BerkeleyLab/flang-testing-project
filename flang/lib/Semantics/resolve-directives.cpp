@@ -330,6 +330,9 @@ public:
   }
   void Post(const parser::OpenMPRequiresConstruct &) { PopContext(); }
 
+  bool Pre(const parser::OpenMPDeclareTargetConstruct &);
+  void Post(const parser::OpenMPDeclareTargetConstruct &) { PopContext(); }
+
   bool Pre(const parser::OpenMPThreadprivate &);
   void Post(const parser::OpenMPThreadprivate &) { PopContext(); }
 
@@ -436,6 +439,16 @@ public:
     return false;
   }
 
+  bool Pre(const parser::OmpClause::UseDevicePtr &x) {
+    ResolveOmpObjectList(x.v, Symbol::Flag::OmpUseDevicePtr);
+    return false;
+  }
+
+  bool Pre(const parser::OmpClause::UseDeviceAddr &x) {
+    ResolveOmpObjectList(x.v, Symbol::Flag::OmpUseDeviceAddr);
+    return false;
+  }
+
   void Post(const parser::Name &);
 
   // Keep track of labels in the statements that causes jumps to target labels
@@ -462,6 +475,28 @@ public:
   void Post(const parser::EndLabel &endLabel) { CheckSourceLabel(endLabel.v); }
   void Post(const parser::EorLabel &eorLabel) { CheckSourceLabel(eorLabel.v); }
 
+  void Post(const parser::OmpMapClause &x) {
+    const auto &ompObjList{std::get<parser::OmpObjectList>(x.t)};
+    for (const auto &ompObj : ompObjList.v) {
+      common::visit(
+          common::visitors{
+              [&](const parser::Designator &designator) {
+                if (const auto *name{GetDesignatorNameIfDataRef(designator)}) {
+                  if (name->symbol &&
+                      semantics::IsAssumedSizeArray(*name->symbol)) {
+                    context_.Say(designator.source,
+                        "Assumed-size whole arrays may not appear on the %s "
+                        "clause"_err_en_US,
+                        "MAP");
+                  }
+                }
+              },
+              [&](const auto &name) {},
+          },
+          ompObj.u);
+    }
+  }
+
   const parser::OmpClause *associatedClause{nullptr};
   void SetAssociatedClause(const parser::OmpClause &c) {
     associatedClause = &c;
@@ -484,10 +519,11 @@ private:
       Symbol::Flag::OmpPrivate, Symbol::Flag::OmpLinear,
       Symbol::Flag::OmpFirstPrivate, Symbol::Flag::OmpLastPrivate,
       Symbol::Flag::OmpReduction, Symbol::Flag::OmpCriticalLock,
-      Symbol::Flag::OmpCopyIn};
+      Symbol::Flag::OmpCopyIn, Symbol::Flag::OmpUseDevicePtr,
+      Symbol::Flag::OmpUseDeviceAddr};
 
   static constexpr Symbol::Flags ompFlagsRequireMark{
-      Symbol::Flag::OmpThreadprivate};
+      Symbol::Flag::OmpThreadprivate, Symbol::Flag::OmpDeclareTarget};
 
   static constexpr Symbol::Flags dataCopyingAttributeFlags{
       Symbol::Flag::OmpCopyIn, Symbol::Flag::OmpCopyPrivate};
@@ -564,7 +600,11 @@ const parser::Name *DirectiveAttributeVisitor<T>::GetLoopIndex(
     const parser::DoConstruct &x) {
   using Bounds = parser::LoopControl::Bounds;
   if (x.GetLoopControl()) {
-    return &std::get<Bounds>(x.GetLoopControl()->u).name.thing;
+    if (const Bounds * b{std::get_if<Bounds>(&x.GetLoopControl()->u)}) {
+      return &b->name.thing;
+    } else {
+      return nullptr;
+    }
   } else {
     context_
         .Say(std::get<parser::Statement<parser::NonLabelDoStmt>>(x.t).source,
@@ -1431,6 +1471,25 @@ bool OmpAttributeVisitor::Pre(const parser::OpenMPCriticalConstruct &x) {
   return true;
 }
 
+bool OmpAttributeVisitor::Pre(const parser::OpenMPDeclareTargetConstruct &x) {
+  PushContext(x.source, llvm::omp::Directive::OMPD_declare_target);
+  const auto &spec{std::get<parser::OmpDeclareTargetSpecifier>(x.t)};
+  if (const auto *objectList{parser::Unwrap<parser::OmpObjectList>(spec.u)}) {
+    ResolveOmpObjectList(*objectList, Symbol::Flag::OmpDeclareTarget);
+  } else if (const auto *clauseList{
+                 parser::Unwrap<parser::OmpClauseList>(spec.u)}) {
+    for (const auto &clause : clauseList->v) {
+      if (const auto *toClause{std::get_if<parser::OmpClause::To>(&clause.u)}) {
+        ResolveOmpObjectList(toClause->v, Symbol::Flag::OmpDeclareTarget);
+      } else if (const auto *linkClause{
+                     std::get_if<parser::OmpClause::Link>(&clause.u)}) {
+        ResolveOmpObjectList(linkClause->v, Symbol::Flag::OmpDeclareTarget);
+      }
+    }
+  }
+  return true;
+}
+
 bool OmpAttributeVisitor::Pre(const parser::OpenMPThreadprivate &x) {
   PushContext(x.source, llvm::omp::Directive::OMPD_threadprivate);
   const auto &list{std::get<parser::OmpObjectList>(x.t)};
@@ -1664,7 +1723,8 @@ void OmpAttributeVisitor::ResolveOmpObject(
                   }
                 }
                 if (ompFlag == Symbol::Flag::OmpDeclarativeAllocateDirective &&
-                    IsAllocatable(*symbol)) {
+                    IsAllocatable(*symbol) &&
+                    !IsNestedInDirective(llvm::omp::Directive::OMPD_allocate)) {
                   context_.Say(designator.source,
                       "List items specified in the ALLOCATE directive must not "
                       "have the ALLOCATABLE attribute unless the directive is "

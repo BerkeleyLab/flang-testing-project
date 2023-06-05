@@ -1992,8 +1992,7 @@ LocalScope* CFGBuilder::createOrReuseLocalScope(LocalScope* Scope) {
   if (Scope)
     return Scope;
   llvm::BumpPtrAllocator &alloc = cfg->getAllocator();
-  return new (alloc.Allocate<LocalScope>())
-      LocalScope(BumpVectorContext(alloc), ScopePos);
+  return new (alloc) LocalScope(BumpVectorContext(alloc), ScopePos);
 }
 
 /// addLocalScopeForStmt - Add LocalScope to local scopes tree for statement
@@ -5214,8 +5213,7 @@ CFGBlock *CFG::createBlock() {
   bool first_block = begin() == end();
 
   // Create the block.
-  CFGBlock *Mem = getAllocator().Allocate<CFGBlock>();
-  new (Mem) CFGBlock(NumBlockIDs++, BlkBVC, this);
+  CFGBlock *Mem = new (getAllocator()) CFGBlock(NumBlockIDs++, BlkBVC, this);
   Blocks.push_back(Mem, BlkBVC);
 
   // If this is the first block, set it as the Entry and Exit.
@@ -5747,7 +5745,8 @@ static void print_elem(raw_ostream &OS, StmtPrinterHelper &Helper,
                        const CFGElement &E);
 
 void CFGElement::dumpToStream(llvm::raw_ostream &OS) const {
-  StmtPrinterHelper Helper(nullptr, {});
+  LangOptions LangOpts;
+  StmtPrinterHelper Helper(nullptr, LangOpts);
   print_elem(OS, Helper, *this);
 }
 

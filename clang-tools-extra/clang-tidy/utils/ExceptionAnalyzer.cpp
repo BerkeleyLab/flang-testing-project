@@ -523,6 +523,19 @@ ExceptionAnalyzer::ExceptionInfo ExceptionAnalyzer::throwsException(
     ExceptionInfo Excs =
         throwsException(DefaultInit->getExpr(), Caught, CallStack);
     Results.merge(Excs);
+  } else if (const auto *Coro = dyn_cast<CoroutineBodyStmt>(St)) {
+    for (const Stmt *Child : Coro->childrenExclBody()) {
+      ExceptionInfo Excs = throwsException(Child, Caught, CallStack);
+      Results.merge(Excs);
+    }
+    ExceptionInfo Excs = throwsException(Coro->getBody(), Caught, CallStack);
+    for (const Type *Throwable : Excs.getExceptionTypes()) {
+      if (const auto ThrowableRec = Throwable->getAsCXXRecordDecl()) {
+        ExceptionInfo DestructorExcs =
+            throwsException(ThrowableRec->getDestructor(), CallStack);
+        Results.merge(DestructorExcs);
+      }
+    }
   } else {
     for (const Stmt *Child : St->children()) {
       ExceptionInfo Excs = throwsException(Child, Caught, CallStack);
@@ -537,7 +550,8 @@ ExceptionAnalyzer::analyzeImpl(const FunctionDecl *Func) {
   ExceptionInfo ExceptionList;
 
   // Check if the function has already been analyzed and reuse that result.
-  if (FunctionCache.count(Func) == 0) {
+  const auto CacheEntry = FunctionCache.find(Func);
+  if (CacheEntry == FunctionCache.end()) {
     llvm::SmallSet<const FunctionDecl *, 32> CallStack;
     ExceptionList = throwsException(Func, CallStack);
 
@@ -545,9 +559,9 @@ ExceptionAnalyzer::analyzeImpl(const FunctionDecl *Func) {
     // because it is best to keep as much information as possible.
     // The results here might be relevant to different analysis passes
     // with different needs as well.
-    FunctionCache.insert(std::make_pair(Func, ExceptionList));
+    FunctionCache.try_emplace(Func, ExceptionList);
   } else
-    ExceptionList = FunctionCache[Func];
+    ExceptionList = CacheEntry->getSecond();
 
   return ExceptionList;
 }
@@ -579,8 +593,7 @@ ExceptionAnalyzer::analyze(const FunctionDecl *Func) {
   return analyzeDispatch(Func);
 }
 
-ExceptionAnalyzer::ExceptionInfo
-ExceptionAnalyzer::analyze(const Stmt *Stmt) {
+ExceptionAnalyzer::ExceptionInfo ExceptionAnalyzer::analyze(const Stmt *Stmt) {
   return analyzeDispatch(Stmt);
 }
 

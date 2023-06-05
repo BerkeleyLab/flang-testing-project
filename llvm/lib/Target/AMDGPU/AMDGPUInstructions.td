@@ -123,29 +123,36 @@ def FMA : Predicate<"Subtarget->hasFMA()">;
 
 def InstFlag : OperandWithDefaultOps <i32, (ops (i32 0))>;
 
-def u16ImmTarget : AsmOperandClass {
-  let Name = "U16Imm";
+class CustomOperandClass<string name, bit optional, string parserMethod>
+    : AsmOperandClass {
+  let Name = name;
+  let PredicateMethod = "is"#name;
+  let ParserMethod = parserMethod;
   let RenderMethod = "addImmOperands";
+  let IsOptional = optional;
+  let DefaultMethod = "default"#name;
 }
 
-def s16ImmTarget : AsmOperandClass {
-  let Name = "S16Imm";
-  let RenderMethod = "addImmOperands";
+class CustomOperandProps<bit optional = 0, string name = NAME> {
+  string ParserMethod = "parse"#name;
+  string PrintMethod = "print"#name;
+  AsmOperandClass ParserMatchClass =
+    CustomOperandClass<name, optional, ParserMethod>;
+  string OperandType = "OPERAND_IMMEDIATE";
 }
 
-let OperandType = "OPERAND_IMMEDIATE" in {
+class CustomOperand<ValueType type, bit optional = 0, string name = NAME>
+  : Operand<type>, CustomOperandProps<optional, name>;
 
-def u16imm : Operand<i16> {
-  let PrintMethod = "printU16ImmOperand";
-  let ParserMatchClass = u16ImmTarget;
+class ImmOperand<ValueType type, string name, bit optional = 0,
+                 string printer = "print"#name>
+    : CustomOperand<type, optional, name> {
+  let ParserMethod = "";
+  let PrintMethod = printer;
 }
 
-def s16imm : Operand<i16> {
-  let PrintMethod = "printU16ImmOperand";
-  let ParserMatchClass = s16ImmTarget;
-}
-
-} // End OperandType = "OPERAND_IMMEDIATE"
+def s16imm : ImmOperand<i16, "S16Imm", 0, "printU16ImmOperand">;
+def u16imm : ImmOperand<i16, "U16Imm", 0, "printU16ImmOperand">;
 
 //===--------------------------------------------------------------------===//
 // Custom Operands
@@ -287,10 +294,6 @@ def srl_16 : PatFrag<
   (ops node:$src0), (srl_oneuse node:$src0, (i32 16))
 >;
 
-def clamp_s16_u8 : PatFrag<
-  (ops node:$src),
-  (i16 (AMDGPUsmed3 $src, (i16 0), (i16 255)))
->;
 
 def hi_i16_elt : PatFrag<
   (ops node:$src0), (i16 (trunc (i32 (srl_16 node:$src0))))

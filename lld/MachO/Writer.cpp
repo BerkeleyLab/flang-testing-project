@@ -978,8 +978,6 @@ template <class LP> void Writer::createOutputSections() {
     dataInCodeSection = make<DataInCodeSection>();
   if (config->emitFunctionStarts)
     functionStartsSection = make<FunctionStartsSection>();
-  if (config->emitBitcodeBundle)
-    make<BitcodeBundleSection>();
 
   switch (config->outputType) {
   case MH_EXECUTE:
@@ -1060,7 +1058,7 @@ void Writer::finalizeAddresses() {
       if (!osec->isNeeded())
         continue;
       // Other kinds of OutputSections have already been finalized.
-      if (auto concatOsec = dyn_cast<ConcatOutputSection>(osec))
+      if (auto *concatOsec = dyn_cast<ConcatOutputSection>(osec))
         concatOsec->finalizeContents();
     }
   }

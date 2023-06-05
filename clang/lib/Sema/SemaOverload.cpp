@@ -26,6 +26,7 @@
 #include "clang/Basic/PartialDiagnostic.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
+#include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Overload.h"
@@ -141,6 +142,7 @@ ImplicitConversionRank clang::GetConversionRank(ImplicitConversionKind Kind) {
     ICR_Conversion,
     ICR_Conversion,
     ICR_Conversion,
+    ICR_Conversion,
     ICR_OCL_Scalar_Widening,
     ICR_Complex_Real_Conversion,
     ICR_Conversion,
@@ -183,6 +185,7 @@ static const char* GetImplicitConversionName(ImplicitConversionKind Kind) {
     "Derived-to-base conversion",
     "Vector conversion",
     "SVE Vector conversion",
+    "RVV Vector conversion",
     "Vector splat",
     "Complex-real conversion",
     "Block Pointer conversion",
@@ -1161,15 +1164,6 @@ Sema::CheckOverload(Scope *S, FunctionDecl *New, const LookupResult &Old,
             !shouldLinkPossiblyHiddenDecl(*I, New))
           continue;
 
-        // C++20 [temp.friend] p9: A non-template friend declaration with a
-        // requires-clause shall be a definition.  A friend function template
-        // with a constraint that depends on a template parameter from an
-        // enclosing template shall be a definition.  Such a constrained friend
-        // function or function template declaration does not declare the same
-        // function or function template as a declaration in any other scope.
-        if (Context.FriendsDifferByConstraints(OldF, New))
-          continue;
-
         Match = *I;
         return Ovl_Match;
       }
@@ -1286,6 +1280,12 @@ bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
        !FunctionParamTypesAreEqual(OldType, NewType)))
     return true;
 
+  // For member-like friends, the enclosing class is part of the signature.
+  if ((New->isMemberLikeConstrainedFriend() ||
+       Old->isMemberLikeConstrainedFriend()) &&
+      !New->getLexicalDeclContext()->Equals(Old->getLexicalDeclContext()))
+    return true;
+
   if (NewTemplate) {
     // C++ [temp.over.link]p4:
     //   The signature of a function template consists of its function
@@ -1297,7 +1297,7 @@ bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
     // We check the return type and template parameter lists for function
     // templates first; the remaining checks follow.
     bool SameTemplateParameterList = TemplateParameterListsAreEqual(
-        NewTemplate->getTemplateParameters(),
+        NewTemplate, NewTemplate->getTemplateParameters(), OldTemplate,
         OldTemplate->getTemplateParameters(), false, TPL_TemplateMatch);
     bool SameReturnType = Context.hasSameType(Old->getDeclaredReturnType(),
                                               New->getDeclaredReturnType());
@@ -1764,6 +1764,14 @@ static bool IsVectorConversion(Sema &S, QualType FromType, QualType ToType,
       return true;
     }
 
+  if (ToType->isRVVSizelessBuiltinType() ||
+      FromType->isRVVSizelessBuiltinType())
+    if (S.Context.areCompatibleRVVTypes(FromType, ToType) ||
+        S.Context.areLaxCompatibleRVVTypes(FromType, ToType)) {
+      ICK = ICK_RVV_Vector_Conversion;
+      return true;
+    }
+
   // We can perform the conversion between vector types in the following cases:
   // 1)vector types are equivalent AltiVec and GCC vector types
   // 2)lax vector conversions are permitted and the vector types are of the
@@ -1987,8 +1995,11 @@ static bool IsStandardConversion(Sema &S, Expr* From, QualType ToType,
     // if their representation is different until there is back end support
     // We of course allow this conversion if long double is really double.
 
-    // Conversions between bfloat and other floats are not permitted.
-    if (FromType == S.Context.BFloat16Ty || ToType == S.Context.BFloat16Ty)
+    // Conversions between bfloat16 and float16 are currently not supported.
+    if ((FromType->isBFloat16Type() &&
+         (ToType->isFloat16Type() || ToType->isHalfType())) ||
+        (ToType->isBFloat16Type() &&
+         (FromType->isFloat16Type() || FromType->isHalfType())))
       return false;
 
     // Conversions between IEEE-quad and IBM-extended semantics are not
@@ -2009,9 +2020,6 @@ static bool IsStandardConversion(Sema &S, Expr* From, QualType ToType,
               ToType->isIntegralType(S.Context)) ||
              (FromType->isIntegralOrUnscopedEnumerationType() &&
               ToType->isRealFloatingType())) {
-    // Conversions between bfloat and int are not permitted.
-    if (FromType->isBFloat16Type() || ToType->isBFloat16Type())
-      return false;
 
     // Floating-integral conversions (C++ 4.9).
     SCS.Second = ICK_Floating_Integral;
@@ -4330,6 +4338,20 @@ CompareStandardConversionSequences(Sema &S, SourceLocation Loc,
                  : ImplicitConversionSequence::Worse;
   }
 
+  if (SCS1.Second == ICK_RVV_Vector_Conversion &&
+      SCS2.Second == ICK_RVV_Vector_Conversion) {
+    bool SCS1IsCompatibleRVVVectorConversion =
+        S.Context.areCompatibleRVVTypes(SCS1.getFromType(), SCS1.getToType(2));
+    bool SCS2IsCompatibleRVVVectorConversion =
+        S.Context.areCompatibleRVVTypes(SCS2.getFromType(), SCS2.getToType(2));
+
+    if (SCS1IsCompatibleRVVVectorConversion !=
+        SCS2IsCompatibleRVVVectorConversion)
+      return SCS1IsCompatibleRVVVectorConversion
+                 ? ImplicitConversionSequence::Better
+                 : ImplicitConversionSequence::Worse;
+  }
+
   return ImplicitConversionSequence::Indistinguishable;
 }
 
@@ -5133,6 +5155,18 @@ TryListConversion(Sema &S, InitListExpr *From, QualType ToType,
   if (!S.isCompleteType(From->getBeginLoc(), InitTy))
     return Result;
 
+  // C++20 [over.ics.list]/2:
+  //   If the initializer list is a designated-initializer-list, a conversion
+  //   is only possible if the parameter has an aggregate type
+  //
+  // FIXME: The exception for reference initialization here is not part of the
+  // language rules, but follow other compilers in adding it as a tentative DR
+  // resolution.
+  bool IsDesignatedInit = From->hasDesignatedInit();
+  if (!ToType->isAggregateType() && !ToType->isReferenceType() &&
+      IsDesignatedInit)
+    return Result;
+
   // Per DR1467:
   //   If the parameter type is a class X and the initializer list has a single
   //   element of type cv U, where U is X or a class derived from X, the
@@ -5143,7 +5177,7 @@ TryListConversion(Sema &S, InitListExpr *From, QualType ToType,
   //   and the initializer list has a single element that is an
   //   appropriately-typed string literal (8.5.2 [dcl.init.string]), the
   //   implicit conversion sequence is the identity conversion.
-  if (From->getNumInits() == 1) {
+  if (From->getNumInits() == 1 && !IsDesignatedInit) {
     if (ToType->isRecordType()) {
       QualType InitType = From->getInit(0)->getType();
       if (S.Context.hasSameUnqualifiedType(InitType, ToType) ||
@@ -5181,7 +5215,7 @@ TryListConversion(Sema &S, InitListExpr *From, QualType ToType,
   //   default-constructible, and if all the elements of the initializer list
   //   can be implicitly converted to X, the implicit conversion sequence is
   //   the worst conversion necessary to convert an element of the list to X.
-  if (AT || S.isStdInitializerList(ToType, &InitTy)) {
+  if ((AT || S.isStdInitializerList(ToType, &InitTy)) && !IsDesignatedInit) {
     unsigned e = From->getNumInits();
     ImplicitConversionSequence DfltElt;
     DfltElt.setBad(BadConversionSequence::no_conversion, QualType(),
@@ -5323,7 +5357,7 @@ TryListConversion(Sema &S, InitListExpr *From, QualType ToType,
 
     // If the initializer list has a single element that is reference-related
     // to the parameter type, we initialize the reference from that.
-    if (From->getNumInits() == 1) {
+    if (From->getNumInits() == 1 && !IsDesignatedInit) {
       Expr *Init = From->getInit(0);
 
       QualType T2 = Init->getType();
@@ -5756,6 +5790,7 @@ static bool CheckConvertedConstantConversions(Sema &S,
   case ICK_Derived_To_Base:
   case ICK_Vector_Conversion:
   case ICK_SVE_Vector_Conversion:
+  case ICK_RVV_Vector_Conversion:
   case ICK_Vector_Splat:
   case ICK_Complex_Real:
   case ICK_Block_Pointer_Conversion:
@@ -6508,23 +6543,20 @@ void Sema::AddOverloadCandidate(
   }
 
   // Functions with internal linkage are only viable in the same module unit.
-  if (auto *MF = Function->getOwningModule()) {
-    if (getLangOpts().CPlusPlusModules && !MF->isModuleMapModule() &&
-        !isModuleUnitOfCurrentTU(MF)) {
-      /// FIXME: Currently, the semantics of linkage in clang is slightly
-      /// different from the semantics in C++ spec. In C++ spec, only names
-      /// have linkage. So that all entities of the same should share one
-      /// linkage. But in clang, different entities of the same could have
-      /// different linkage.
-      NamedDecl *ND = Function;
-      if (auto *SpecInfo = Function->getTemplateSpecializationInfo())
-        ND = SpecInfo->getTemplate();
-      
-      if (ND->getFormalLinkage() == Linkage::InternalLinkage) {
-        Candidate.Viable = false;
-        Candidate.FailureKind = ovl_fail_module_mismatched;
-        return;
-      }
+  if (getLangOpts().CPlusPlusModules && Function->isInAnotherModuleUnit()) {
+    /// FIXME: Currently, the semantics of linkage in clang is slightly
+    /// different from the semantics in C++ spec. In C++ spec, only names
+    /// have linkage. So that all entities of the same should share one
+    /// linkage. But in clang, different entities of the same could have
+    /// different linkage.
+    NamedDecl *ND = Function;
+    if (auto *SpecInfo = Function->getTemplateSpecializationInfo())
+      ND = SpecInfo->getTemplate();
+
+    if (ND->getFormalLinkage() == Linkage::InternalLinkage) {
+      Candidate.Viable = false;
+      Candidate.FailureKind = ovl_fail_module_mismatched;
+      return;
     }
   }
 
@@ -9894,7 +9926,7 @@ bool clang::isBetterOverloadCandidate(
     }
   }
 
-  // C++ [over.match.best]p1: (Changed in C++2b)
+  // C++ [over.match.best]p1: (Changed in C++23)
   //
   //   -- if F is a static member function, ICS1(F) is defined such
   //      that ICS1(F) is neither better nor worse than ICS1(G) for
@@ -10376,7 +10408,8 @@ enum OverloadCandidateSelect {
 };
 
 static std::pair<OverloadCandidateKind, OverloadCandidateSelect>
-ClassifyOverloadCandidate(Sema &S, NamedDecl *Found, FunctionDecl *Fn,
+ClassifyOverloadCandidate(Sema &S, const NamedDecl *Found,
+                          const FunctionDecl *Fn,
                           OverloadCandidateRewriteKind CRK,
                           std::string &Description) {
 
@@ -10400,7 +10433,7 @@ ClassifyOverloadCandidate(Sema &S, NamedDecl *Found, FunctionDecl *Fn,
     if (CRK & CRK_Reversed)
       return oc_reversed_binary_operator;
 
-    if (CXXConstructorDecl *Ctor = dyn_cast<CXXConstructorDecl>(Fn)) {
+    if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(Fn)) {
       if (!Ctor->isImplicit()) {
         if (isa<ConstructorUsingShadowDecl>(Found))
           return oc_inherited_constructor;
@@ -10419,7 +10452,7 @@ ClassifyOverloadCandidate(Sema &S, NamedDecl *Found, FunctionDecl *Fn,
       return oc_implicit_copy_constructor;
     }
 
-    if (CXXMethodDecl *Meth = dyn_cast<CXXMethodDecl>(Fn)) {
+    if (const auto *Meth = dyn_cast<CXXMethodDecl>(Fn)) {
       // This actually gets spelled 'candidate function' for now, but
       // it doesn't hurt to split it out.
       if (!Meth->isImplicit())
@@ -10441,10 +10474,10 @@ ClassifyOverloadCandidate(Sema &S, NamedDecl *Found, FunctionDecl *Fn,
   return std::make_pair(Kind, Select);
 }
 
-void MaybeEmitInheritedConstructorNote(Sema &S, Decl *FoundDecl) {
+void MaybeEmitInheritedConstructorNote(Sema &S, const Decl *FoundDecl) {
   // FIXME: It'd be nice to only emit a note once per using-decl per overload
   // set.
-  if (auto *Shadow = dyn_cast<ConstructorUsingShadowDecl>(FoundDecl))
+  if (const auto *Shadow = dyn_cast<ConstructorUsingShadowDecl>(FoundDecl))
     S.Diag(FoundDecl->getLocation(),
            diag::note_ovl_candidate_inherited_constructor)
       << Shadow->getNominatedBaseClass();
@@ -10551,7 +10584,7 @@ bool Sema::checkAddressOfFunctionIsAvailable(const FunctionDecl *Function,
 
 // Don't print candidates other than the one that matches the calling
 // convention of the call operator, since that is guaranteed to exist.
-static bool shouldSkipNotingLambdaConversionDecl(FunctionDecl *Fn) {
+static bool shouldSkipNotingLambdaConversionDecl(const FunctionDecl *Fn) {
   const auto *ConvD = dyn_cast<CXXConversionDecl>(Fn);
 
   if (!ConvD)
@@ -10571,7 +10604,7 @@ static bool shouldSkipNotingLambdaConversionDecl(FunctionDecl *Fn) {
 }
 
 // Notes the location of an overload candidate.
-void Sema::NoteOverloadCandidate(NamedDecl *Found, FunctionDecl *Fn,
+void Sema::NoteOverloadCandidate(const NamedDecl *Found, const FunctionDecl *Fn,
                                  OverloadCandidateRewriteKind RewriteKind,
                                  QualType DestType, bool TakingAddress) {
   if (TakingAddress && !checkAddressOfCandidateIsAvailable(*this, Fn))
@@ -12764,10 +12797,9 @@ bool Sema::resolveAndFixAddressOfSingleOverloadCandidate(
 ///
 /// If no template-ids are found, no diagnostics are emitted and NULL is
 /// returned.
-FunctionDecl *
-Sema::ResolveSingleFunctionTemplateSpecialization(OverloadExpr *ovl,
-                                                  bool Complain,
-                                                  DeclAccessPair *FoundResult) {
+FunctionDecl *Sema::ResolveSingleFunctionTemplateSpecialization(
+    OverloadExpr *ovl, bool Complain, DeclAccessPair *FoundResult,
+    TemplateSpecCandidateSet *FailedTSC) {
   // C++ [over.over]p1:
   //   [...] [Note: any redundant set of parentheses surrounding the
   //   overloaded function name is ignored (5.1). ]
@@ -12781,7 +12813,6 @@ Sema::ResolveSingleFunctionTemplateSpecialization(OverloadExpr *ovl,
 
   TemplateArgumentListInfo ExplicitTemplateArgs;
   ovl->copyTemplateArgumentsInto(ExplicitTemplateArgs);
-  TemplateSpecCandidateSet FailedCandidates(ovl->getNameLoc());
 
   // Look through all of the overloaded functions, searching for one
   // whose type matches exactly.
@@ -12804,16 +12835,16 @@ Sema::ResolveSingleFunctionTemplateSpecialization(OverloadExpr *ovl,
     //   function template specialization, which is added to the set of
     //   overloaded functions considered.
     FunctionDecl *Specialization = nullptr;
-    TemplateDeductionInfo Info(FailedCandidates.getLocation());
+    TemplateDeductionInfo Info(ovl->getNameLoc());
     if (TemplateDeductionResult Result
           = DeduceTemplateArguments(FunctionTemplate, &ExplicitTemplateArgs,
                                     Specialization, Info,
                                     /*IsAddressOfFunction*/true)) {
       // Make a note of the failed deduction for diagnostics.
-      // TODO: Actually use the failed-deduction info?
-      FailedCandidates.addCandidate()
-          .set(I.getPair(), FunctionTemplate->getTemplatedDecl(),
-               MakeDeductionFailureInfo(Context, Result, Info));
+      if (FailedTSC)
+        FailedTSC->addCandidate().set(
+            I.getPair(), FunctionTemplate->getTemplatedDecl(),
+            MakeDeductionFailureInfo(Context, Result, Info));
       continue;
     }
 
@@ -15063,7 +15094,7 @@ Sema::BuildCallToObjectOfClassType(Scope *S, Expr *Obj,
   bool IsError = false;
 
   // Initialize the implicit object parameter if needed.
-  // Since C++2b, this could also be a call to a static call operator
+  // Since C++23, this could also be a call to a static call operator
   // which we emit as a regular CallExpr.
   if (Method->isInstance()) {
     ExprResult ObjRes = PerformObjectArgumentInitialization(
@@ -15429,8 +15460,14 @@ Expr *Sema::FixOverloadedFunctionReference(Expr *E, DeclAccessPair Found,
       unsigned ResultIdx = GSE->getResultIndex();
       AssocExprs[ResultIdx] = SubExpr;
 
+      if (GSE->isExprPredicate())
+        return GenericSelectionExpr::Create(
+            Context, GSE->getGenericLoc(), GSE->getControllingExpr(),
+            GSE->getAssocTypeSourceInfos(), AssocExprs, GSE->getDefaultLoc(),
+            GSE->getRParenLoc(), GSE->containsUnexpandedParameterPack(),
+            ResultIdx);
       return GenericSelectionExpr::Create(
-          Context, GSE->getGenericLoc(), GSE->getControllingExpr(),
+          Context, GSE->getGenericLoc(), GSE->getControllingType(),
           GSE->getAssocTypeSourceInfos(), AssocExprs, GSE->getDefaultLoc(),
           GSE->getRParenLoc(), GSE->containsUnexpandedParameterPack(),
           ResultIdx);

@@ -227,7 +227,7 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgValues(CmdArgs, options::OPT__SLASH_link);
 
   // Control Flow Guard checks
-  if (Arg *A = Args.getLastArg(options::OPT__SLASH_guard)) {
+  for (const Arg *A : Args.filtered(options::OPT__SLASH_guard)) {
     StringRef GuardArgs = A->getValue();
     if (GuardArgs.equals_insensitive("cf") ||
         GuardArgs.equals_insensitive("cf,nochecks")) {
@@ -381,7 +381,7 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       // find it.
       for (const char *Cursor = EnvBlock.data(); *Cursor != '\0';) {
         llvm::StringRef EnvVar(Cursor);
-        if (EnvVar.startswith_insensitive("path=")) {
+        if (EnvVar.starts_with_insensitive("path=")) {
           constexpr size_t PrefixLen = 5; // strlen("path=")
           Environment.push_back(Args.MakeArgString(
               EnvVar.substr(0, PrefixLen) +
@@ -785,6 +785,9 @@ VersionTuple MSVCToolChain::computeMSVCVersion(const Driver *D,
       Args.hasFlag(options::OPT_fms_extensions, options::OPT_fno_ms_extensions,
                    IsWindowsMSVC)) {
     // -fms-compatibility-version=19.20 is default, aka 2019, 16.x
+    // NOTE: when changing this value, also update
+    // clang/docs/CommandGuide/clang.rst and clang/docs/UsersManual.rst
+    // accordingly.
     MSVT = VersionTuple(19, 20);
   }
   return MSVT;

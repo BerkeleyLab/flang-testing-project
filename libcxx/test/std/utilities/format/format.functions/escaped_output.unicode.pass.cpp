@@ -6,18 +6,18 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17, c++20
-// UNSUPPORTED: libcpp-has-no-incomplete-format
 
 // This version runs the test when the platform has Unicode support.
 // UNSUPPORTED: libcpp-has-no-unicode
 
-// TODO FMT Investigate Windows and AIX issues.
-// UNSUPPORTED: msvc, target={{.+}}-windows-gnu
-// UNSUPPORTED: LIBCXX-AIX-FIXME
+// TODO FMT Investigate Windows and 32-bit AIX issues.
+// UNSUPPORTED: msvc, target={{.+}}-windows-gnu, target=powerpc-ibm-aix{{.*}}
+
+// TODO FMT Fix this test using GCC, it currently crashes.
+// UNSUPPORTED: gcc-12
 
 // TODO FMT This test should not require std::to_chars(floating-point)
-// This test requires std::to_chars(floating-point), which is in the dylib
-// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx{{10.9|10.10|10.11|10.12|10.13|10.14|10.15|11.0}}
+// XFAIL: availability-fp_to_chars-missing
 
 // <format>
 

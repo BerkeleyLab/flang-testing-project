@@ -1,11 +1,11 @@
-// RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha.unix.Stream,alpha.unix.StdCLibraryFunctionArgs,debug.ExprInspection \
-// RUN:   -analyzer-config apiModeling.StdCLibraryFunctions:ModelPOSIX=true -verify=stdargs,any %s
+// RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha.unix.Stream,alpha.unix.StdCLibraryFunctions,debug.ExprInspection \
+// RUN:   -analyzer-config alpha.unix.StdCLibraryFunctions:ModelPOSIX=true -verify=stdargs,any %s
 
 // RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha.unix.Stream,debug.ExprInspection \
-// RUN:   -analyzer-config apiModeling.StdCLibraryFunctions:ModelPOSIX=true -verify=any %s
+// RUN:   -analyzer-config alpha.unix.StdCLibraryFunctions:ModelPOSIX=true -verify=any %s
 
-// RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha.unix.StdCLibraryFunctionArgs,debug.ExprInspection \
-// RUN:   -analyzer-config apiModeling.StdCLibraryFunctions:ModelPOSIX=true -verify=stdargs,any %s
+// RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha.unix.StdCLibraryFunctions,debug.ExprInspection \
+// RUN:   -analyzer-config alpha.unix.StdCLibraryFunctions:ModelPOSIX=true -verify=stdargs,any %s
 
 #include "Inputs/system-header-simulator.h"
 
@@ -42,7 +42,7 @@ void test_freopen(void) {
 
 void test_fread(void) {
   FILE *fp = tmpfile();
-  size_t ret = fread(buf, size, n, fp); // stdargs-warning{{The 4th argument to 'fread' should not be NULL}}
+  size_t ret = fread(buf, size, n, fp); // stdargs-warning{{The 4th argument to 'fread' is NULL but should not be NULL}}
   clang_analyzer_eval(fp != NULL); // any-warning{{TRUE}}
   clang_analyzer_eval(ret <= n); // any-warning{{TRUE}}
   clang_analyzer_eval(ret == n); // any-warning{{TRUE}} any-warning{{FALSE}}
@@ -52,7 +52,7 @@ void test_fread(void) {
 
 void test_fwrite(void) {
   FILE *fp = tmpfile();
-  size_t ret = fwrite(buf, size, n, fp); // stdargs-warning{{The 4th argument to 'fwrite' should not be NULL}}
+  size_t ret = fwrite(buf, size, n, fp); // stdargs-warning{{The 4th argument to 'fwrite' is NULL but should not be NULL}}
   clang_analyzer_eval(fp != NULL); // any-warning{{TRUE}}
   clang_analyzer_eval(ret <= n); // any-warning{{TRUE}}
   clang_analyzer_eval(ret == n); // any-warning{{TRUE}} any-warning{{FALSE}}

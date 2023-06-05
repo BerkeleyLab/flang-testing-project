@@ -1,7 +1,7 @@
 // RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha.unix.Stream -analyzer-output text \
 // RUN:   -verify %s
-// RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha.unix.Stream,alpha.unix.StdCLibraryFunctionArgs -analyzer-output text \
-// RUN:   -analyzer-config apiModeling.StdCLibraryFunctions:ModelPOSIX=true -verify=expected,stdargs %s
+// RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha.unix.Stream,alpha.unix.StdCLibraryFunctions -analyzer-output text \
+// RUN:   -analyzer-config alpha.unix.StdCLibraryFunctions:ModelPOSIX=true -verify=expected,stdargs %s
 
 #include "Inputs/system-header-simulator.h"
 
@@ -88,8 +88,8 @@ void check_track_null(void) {
     fclose(F);
     return;
   }
-  fclose(F); // stdargs-warning {{The 1st argument to 'fclose' should not be NULL}}
-             // stdargs-note@-1 {{The 1st argument to 'fclose' should not be NULL}}
+  fclose(F); // stdargs-warning {{The 1st argument to 'fclose' is NULL but should not be NULL}}
+             // stdargs-note@-1 {{The 1st argument to 'fclose' is NULL but should not be NULL}}
 }
 
 void check_eof_notes_feof_after_feof(void) {

@@ -163,8 +163,8 @@ TextEdit toTextEdit(const FixItHint &FixIt, const SourceManager &M,
 /// This function should be used when paths needs to be used outside the
 /// component that generate it, so that paths are normalized as much as
 /// possible.
-std::optional<std::string> getCanonicalPath(const FileEntry *F,
-                                            const SourceManager &SourceMgr);
+std::optional<std::string> getCanonicalPath(const FileEntryRef F,
+                                            FileManager &FileMgr);
 
 /// Choose the clang-format style we should apply to a certain file.
 /// This will usually use FS to look for .clang-format directories.

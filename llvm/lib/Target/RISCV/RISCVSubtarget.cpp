@@ -1,4 +1,4 @@
-//===-- RISCVSubtarget.cpp - RISCV Subtarget Information ------------------===//
+//===-- RISCVSubtarget.cpp - RISC-V Subtarget Information -----------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements the RISCV specific subclass of TargetSubtargetInfo.
+// This file implements the RISC-V specific subclass of TargetSubtargetInfo.
 //
 //===----------------------------------------------------------------------===//
 
@@ -83,13 +83,10 @@ RISCVSubtarget::RISCVSubtarget(const Triple &TT, StringRef CPU,
       FrameLowering(
           initializeSubtargetDependencies(TT, CPU, TuneCPU, FS, ABIName)),
       InstrInfo(*this), RegInfo(getHwMode()), TLInfo(TM, *this) {
-  if (RISCV::isX18ReservedByDefault(TT))
-    UserReservedRegister.set(RISCV::X18);
-
   CallLoweringInfo.reset(new RISCVCallLowering(*getTargetLowering()));
   Legalizer.reset(new RISCVLegalizerInfo(*this));
 
-  auto *RBI = new RISCVRegisterBankInfo(*getRegisterInfo());
+  auto *RBI = new RISCVRegisterBankInfo(getHwMode());
   RegBankInfo.reset(RBI);
   InstSelector.reset(createRISCVInstructionSelector(
       *static_cast<const RISCVTargetMachine *>(&TM), *this, *RBI));

@@ -70,7 +70,12 @@
 using namespace llvm;
 
 namespace llvm {
-extern const MCInstrDesc ARMInsts[];
+struct ARMInstrTable {
+  MCInstrDesc Insts[4445];
+  MCOperandInfo OperandInfo[3026];
+  MCPhysReg ImplicitOps[130];
+};
+extern const ARMInstrTable ARMDescs;
 } // end namespace llvm
 
 namespace {
@@ -1253,34 +1258,6 @@ public:
 
   bool isImmThumbSR() const {
     return isImmediate<1, 33>();
-  }
-
-  template<int shift>
-  bool isExpImmValue(uint64_t Value) const {
-    uint64_t mask = (1 << shift) - 1;
-    if ((Value & mask) != 0 || (Value >> shift) > 0xff)
-      return false;
-    return true;
-  }
-
-  template<int shift>
-  bool isExpImm() const {
-    if (!isImm()) return false;
-    const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
-    if (!CE) return false;
-
-    return isExpImmValue<shift>(CE->getValue());
-  }
-
-  template<int shift, int size>
-  bool isInvertedExpImm() const {
-    if (!isImm()) return false;
-    const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
-    if (!CE) return false;
-
-    uint64_t OriginalValue = CE->getValue();
-    uint64_t InvertedValue = OriginalValue ^ (((uint64_t)1 << size) - 1);
-    return isExpImmValue<shift>(InvertedValue);
   }
 
   bool isPKHLSLImm() const {
@@ -2504,7 +2481,7 @@ public:
     } else {
       unsigned NextOpIndex = Inst.getNumOperands();
       const MCInstrDesc &MCID =
-          ARMInsts[ARM::INSTRUCTION_LIST_END - 1 - Inst.getOpcode()];
+          ARMDescs.Insts[ARM::INSTRUCTION_LIST_END - 1 - Inst.getOpcode()];
       int TiedOp = MCID.getOperandConstraint(NextOpIndex, MCOI::TIED_TO);
       assert(TiedOp >= 0 &&
              "Inactive register in vpred_r is not tied to an output!");
@@ -11441,6 +11418,7 @@ bool ARMAsmParser::parseDirectiveThumb(SMLoc L) {
     SwitchMode();
 
   getParser().getStreamer().emitAssemblerFlag(MCAF_Code16);
+  getParser().getStreamer().emitCodeAlignment(Align(2), &getSTI(), 0);
   return false;
 }
 
@@ -11453,6 +11431,7 @@ bool ARMAsmParser::parseDirectiveARM(SMLoc L) {
   if (isThumb())
     SwitchMode();
   getParser().getStreamer().emitAssemblerFlag(MCAF_Code32);
+  getParser().getStreamer().emitCodeAlignment(Align(4), &getSTI(), 0);
   return false;
 }
 
@@ -11952,7 +11931,7 @@ bool ARMAsmParser::parseDirectiveSetFP(SMLoc L) {
     Offset = CE->getValue();
   }
 
-  if (Parser.parseToken(AsmToken::EndOfStatement))
+  if (Parser.parseEOL())
     return true;
 
   getTargetStreamer().emitSetFP(static_cast<unsigned>(FPReg),
@@ -12770,7 +12749,7 @@ bool ARMAsmParser::enableArchExtFeature(StringRef Name, SMLoc &ExtLoc) {
       {ARM::AEK_XSCALE, {}, {}},
   };
   bool EnableFeature = true;
-  if (Name.startswith_insensitive("no")) {
+  if (Name.starts_with_insensitive("no")) {
     EnableFeature = false;
     Name = Name.substr(2);
   }

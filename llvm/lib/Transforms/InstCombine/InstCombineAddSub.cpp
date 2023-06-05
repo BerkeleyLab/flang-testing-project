@@ -1554,6 +1554,13 @@ Instruction *InstCombinerImpl::visitAdd(BinaryOperator &I) {
   if (Instruction *Ashr = foldAddToAshr(I))
     return Ashr;
 
+  // min(A, B) + max(A, B) => A + B.
+  if (match(&I, m_CombineOr(m_c_Add(m_SMax(m_Value(A), m_Value(B)),
+                                    m_c_SMin(m_Deferred(A), m_Deferred(B))),
+                            m_c_Add(m_UMax(m_Value(A), m_Value(B)),
+                                    m_c_UMin(m_Deferred(A), m_Deferred(B))))))
+    return BinaryOperator::CreateWithCopiedFlags(Instruction::Add, A, B, &I);
+
   // TODO(jingyue): Consider willNotOverflowSignedAdd and
   // willNotOverflowUnsignedAdd to reduce the number of invocations of
   // computeKnownBits.
@@ -1804,6 +1811,20 @@ Instruction *InstCombinerImpl::visitFAdd(BinaryOperator &I) {
       return replaceInstUsesWith(I, V);
   }
 
+  // minumum(X, Y) + maximum(X, Y) => X + Y.
+  if (match(&I,
+            m_c_FAdd(m_Intrinsic<Intrinsic::maximum>(m_Value(X), m_Value(Y)),
+                     m_c_Intrinsic<Intrinsic::minimum>(m_Deferred(X),
+                                                       m_Deferred(Y))))) {
+    BinaryOperator *Result = BinaryOperator::CreateFAddFMF(X, Y, &I);
+    // We cannot preserve ninf if nnan flag is not set.
+    // If X is NaN and Y is Inf then in original program we had NaN + NaN,
+    // while in optimized version NaN + Inf and this is a poison with ninf flag.
+    if (!Result->hasNoNaNs())
+      Result->setHasNoInfs(false);
+    return Result;
+  }
+
   return nullptr;
 }
 
@@ -1974,8 +1995,17 @@ Instruction *InstCombinerImpl::visitSub(BinaryOperator &I) {
     Constant *C2;
 
     // C-(X+C2) --> (C-C2)-X
-    if (match(Op1, m_Add(m_Value(X), m_ImmConstant(C2))))
-      return BinaryOperator::CreateSub(ConstantExpr::getSub(C, C2), X);
+    if (match(Op1, m_Add(m_Value(X), m_ImmConstant(C2)))) {
+      // C-C2 never overflow, and C-(X+C2), (X+C2) has NSW
+      // => (C-C2)-X can have NSW
+      bool WillNotSOV = willNotOverflowSignedSub(C, C2, I);
+      BinaryOperator *Res =
+          BinaryOperator::CreateSub(ConstantExpr::getSub(C, C2), X);
+      auto *OBO1 = cast<OverflowingBinaryOperator>(Op1);
+      Res->setHasNoSignedWrap(I.hasNoSignedWrap() && OBO1->hasNoSignedWrap() &&
+                              WillNotSOV);
+      return Res;
+    }
   }
 
   auto TryToNarrowDeduceFlags = [this, &I, &Op0, &Op1]() -> Instruction * {

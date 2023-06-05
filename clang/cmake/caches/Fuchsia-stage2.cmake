@@ -1,5 +1,7 @@
 # This file sets up a CMakeCache for the second stage of a Fuchsia toolchain build.
 
+option(FUCHSIA_ENABLE_LLDB "Enable LLDB")
+
 set(LLVM_TARGETS_TO_BUILD X86;ARM;AArch64;RISCV CACHE STRING "")
 
 set(PACKAGE_VENDOR Fuchsia CACHE STRING "")
@@ -9,6 +11,7 @@ set(LLVM_ENABLE_RUNTIMES "compiler-rt;libcxx;libcxxabi;libunwind" CACHE STRING "
 
 set(LLVM_ENABLE_BACKTRACES OFF CACHE BOOL "")
 set(LLVM_ENABLE_DIA_SDK OFF CACHE BOOL "")
+set(LLVM_ENABLE_HTTPLIB ON CACHE BOOL "")
 set(LLVM_ENABLE_LIBCXX ON CACHE BOOL "")
 set(LLVM_ENABLE_LIBEDIT OFF CACHE BOOL "")
 set(LLVM_ENABLE_LLD ON CACHE BOOL "")
@@ -292,9 +295,9 @@ set(LLVM_INSTALL_TOOLCHAIN_ONLY ON CACHE BOOL "")
 set(LLVM_TOOLCHAIN_TOOLS
   dsymutil
   llvm-ar
-  llvm-bolt
   llvm-cov
   llvm-cxxfilt
+  llvm-debuginfod
   llvm-debuginfod-find
   llvm-dlltool
   ${LLVM_DRIVER_TARGET}
@@ -326,7 +329,8 @@ set(LLVM_TOOLCHAIN_TOOLS
   scan-build-py
   CACHE STRING "")
 
-set(_FUCHSIA_DISTRIBUTION_COMPONENTS
+set(LLVM_Toolchain_DISTRIBUTION_COMPONENTS
+  bolt
   clang
   lld
   clang-apply-replacements
@@ -341,13 +345,21 @@ set(_FUCHSIA_DISTRIBUTION_COMPONENTS
   find-all-symbols
   builtins
   runtimes
-  ${LLVM_TOOLCHAIN_TOOLS})
+  ${LLVM_TOOLCHAIN_TOOLS}
+  CACHE STRING "")
 
-set(FUCHSIA_ENABLE_LLDB OFF CACHE BOOL "Enable LLDB")
+set(_FUCHSIA_DISTRIBUTIONS Toolchain)
+
 if(FUCHSIA_ENABLE_LLDB)
   list(APPEND _FUCHSIA_ENABLE_PROJECTS lldb)
-  list(APPEND _FUCHSIA_DISTRIBUTION_COMPONENTS lldb liblldb lldb-server lldb-argdumper)
+  list(APPEND _FUCHSIA_DISTRIBUTIONS Debugger)
+  set(LLVM_Debugger_DISTRIBUTION_COMPONENTS
+    lldb
+    liblldb
+    lldb-server
+    lldb-argdumper
+    CACHE STRING "")
 endif()
 
+set(LLVM_DISTRIBUTIONS ${_FUCHSIA_DISTRIBUTIONS} CACHE STRING "")
 set(LLVM_ENABLE_PROJECTS ${_FUCHSIA_ENABLE_PROJECTS} CACHE STRING "")
-set(LLVM_DISTRIBUTION_COMPONENTS ${_FUCHSIA_DISTRIBUTION_COMPONENTS} CACHE STRING "")

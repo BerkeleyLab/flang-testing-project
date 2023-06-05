@@ -206,14 +206,12 @@ Status ProcessMinidump::DoLoadCore() {
                                    arch.GetArchitectureName());
     return error;
   }
-  GetTarget().SetArchitecture(arch, /*set_platform = */ true);
+  GetTarget().SetArchitecture(arch, true /*set_platform*/);
 
   m_thread_list = m_minidump_parser->GetThreads();
   m_active_exception = m_minidump_parser->GetExceptionStream();
 
-  auto platform_sp = GetTarget().GetPlatform();
-  if (platform_sp)
-    SetUnixSignals(platform_sp->GetUnixSignals());
+  SetUnixSignals(UnixSignals::Create(GetArchitecture()));
 
   ReadModuleList();
   if (ModuleSP module = GetTarget().GetExecutableModule())
@@ -469,7 +467,7 @@ void ProcessMinidump::ReadModuleList() {
 
     // check if the process is wow64 - a 32 bit windows process running on a
     // 64 bit windows
-    if (llvm::StringRef(name).endswith_insensitive("wow64.dll")) {
+    if (llvm::StringRef(name).ends_with_insensitive("wow64.dll")) {
       m_is_wow64 = true;
     }
 

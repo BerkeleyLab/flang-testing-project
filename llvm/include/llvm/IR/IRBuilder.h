@@ -567,6 +567,12 @@ public:
     return DL.getIntPtrType(Context, AddrSpace);
   }
 
+  /// Fetch the type of an integer that should be used to index GEP operations
+  /// within AddressSpace.
+  IntegerType *getIndexTy(const DataLayout &DL, unsigned AddrSpace) {
+    return DL.getIndexType(Context, AddrSpace);
+  }
+
   //===--------------------------------------------------------------------===//
   // Intrinsic creation methods
   //===--------------------------------------------------------------------===//
@@ -793,6 +799,12 @@ public:
   /// Create a call to Masked Compress Store intrinsic
   CallInst *CreateMaskedCompressStore(Value *Val, Value *Ptr,
                                       Value *Mask = nullptr);
+
+  /// Return an all true boolean vector (mask) with \p NumElts lanes.
+  Value *getAllOnesMask(ElementCount NumElts) {
+    VectorType *VTy = VectorType::get(Type::getInt1Ty(Context), NumElts);
+    return Constant::getAllOnesValue(VTy);
+  }
 
   /// Create an assume intrinsic call that allows the optimizer to
   /// assume that the provided condition will be true.
@@ -2431,12 +2443,12 @@ public:
 
   /// Return a boolean value testing if \p Arg == 0.
   Value *CreateIsNull(Value *Arg, const Twine &Name = "") {
-    return CreateICmpEQ(Arg, ConstantInt::getNullValue(Arg->getType()), Name);
+    return CreateICmpEQ(Arg, Constant::getNullValue(Arg->getType()), Name);
   }
 
   /// Return a boolean value testing if \p Arg != 0.
   Value *CreateIsNotNull(Value *Arg, const Twine &Name = "") {
-    return CreateICmpNE(Arg, ConstantInt::getNullValue(Arg->getType()), Name);
+    return CreateICmpNE(Arg, Constant::getNullValue(Arg->getType()), Name);
   }
 
   /// Return a boolean value testing if \p Arg < 0.

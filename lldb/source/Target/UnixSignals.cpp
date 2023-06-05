@@ -7,8 +7,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Target/UnixSignals.h"
+#include "Plugins/Process/Utility/FreeBSDSignals.h"
+#include "Plugins/Process/Utility/LinuxSignals.h"
+#include "Plugins/Process/Utility/NetBSDSignals.h"
 #include "lldb/Host/HostInfo.h"
-#include "lldb/Target/Platform.h"
 #include "lldb/Utility/ArchSpec.h"
 #include <optional>
 #include <sstream>
@@ -28,25 +30,24 @@ UnixSignals::Signal::Signal(const char *name, bool default_suppress,
     m_description.assign(description);
 }
 
-lldb::UnixSignalsSP UnixSignals::CreateForHost() {
-  static lldb::UnixSignalsSP s_unix_signals_sp;
-  if (s_unix_signals_sp)
-    return s_unix_signals_sp;
-
-  auto host_platform_sp = Platform::GetHostPlatform();
-
-  // If we have no host platform, be resilient and use default UnixSignals.
-  if (!host_platform_sp)
-    s_unix_signals_sp = std::make_shared<UnixSignals>();
-  else {
-    s_unix_signals_sp = host_platform_sp->CreateUnixSignals();
-    // If the Host platform cannot create a UnixSignals object, fall back to the
-    // default UnixSignals. This may happen on platforms without a
-    // UnixSignals implementation (e.g. Windows).
-    if (!s_unix_signals_sp)
-      s_unix_signals_sp = std::make_shared<UnixSignals>();
+lldb::UnixSignalsSP UnixSignals::Create(const ArchSpec &arch) {
+  const auto &triple = arch.GetTriple();
+  switch (triple.getOS()) {
+  case llvm::Triple::Linux:
+    return std::make_shared<LinuxSignals>();
+  case llvm::Triple::FreeBSD:
+  case llvm::Triple::OpenBSD:
+    return std::make_shared<FreeBSDSignals>();
+  case llvm::Triple::NetBSD:
+    return std::make_shared<NetBSDSignals>();
+  default:
+    return std::make_shared<UnixSignals>();
   }
+}
 
+lldb::UnixSignalsSP UnixSignals::CreateForHost() {
+  static lldb::UnixSignalsSP s_unix_signals_sp =
+      Create(HostInfo::GetArchitecture());
   return s_unix_signals_sp;
 }
 
@@ -112,13 +113,14 @@ void UnixSignals::AddSignal(int signo, const char *name, bool default_suppress,
   ++m_version;
 }
 
-void UnixSignals::AddSignalCode(int signo, int code, const char *description,
+void UnixSignals::AddSignalCode(int signo, int code,
+                                const llvm::StringLiteral description,
                                 SignalCodePrintOption print_option) {
   collection::iterator signal = m_signals.find(signo);
   assert(signal != m_signals.end() &&
          "Tried to add code to signal that does not exist.");
   signal->second.m_codes.insert(
-      std::pair{code, SignalCode{ConstString(description), print_option}});
+      std::pair{code, SignalCode{description, print_option}});
   ++m_version;
 }
 
@@ -149,13 +151,13 @@ UnixSignals::GetSignalDescription(int32_t signo, std::optional<int32_t> code,
     str = pos->second.m_name.GetCString();
 
     if (code) {
-      std::map<int, SignalCode>::const_iterator cpos =
+      std::map<int32_t, SignalCode>::const_iterator cpos =
           pos->second.m_codes.find(*code);
       if (cpos != pos->second.m_codes.end()) {
         const SignalCode &sc = cpos->second;
         str += ": ";
         if (sc.m_print_option != SignalCodePrintOption::Bounds)
-          str += sc.m_description.GetCString();
+          str += sc.m_description.str();
 
         std::stringstream strm;
         switch (sc.m_print_option) {
@@ -177,7 +179,7 @@ UnixSignals::GetSignalDescription(int32_t signo, std::optional<int32_t> code,
             strm << ", upper bound: 0x" << std::hex << *upper;
             strm << ")";
           } else
-            strm << sc.m_description.GetCString();
+            strm << sc.m_description.str();
 
           break;
         }
