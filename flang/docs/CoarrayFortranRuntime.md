@@ -363,6 +363,18 @@ The following table outlines which tasks will be the responsibility of the Fortr
   * **Argument descriptions**:
     * **`coarray_handles`**: Is an array of all of the handles for the coarrays that shall be deallocated.
 
+ #### `caf_deallocate_non_symmetric`
+  * **Description**: TODO: fill in
+  * **Procedure Interface**:
+    ```
+      subroutine caf_deallocate_non_symmetric(mem)
+        implicit none
+        type(c_ptr), intent(in) :: mem
+      end subroutine
+    ```
+  * **Argument descriptions**:
+    * **`mem`**:
+
 
 ### Coarray Access
 
@@ -395,19 +407,46 @@ The following table outlines which tasks will be the responsibility of the Fortr
   * **Description**: This procedure assigns to a coarray. The compiler shall call this procedure when there is a coarray reference that is a `coindexed-object`. The compiler shall not (REMOVE_NOTE: need to?) call this procedure when the coarray reference is not a `coindexed-object`. This procedure blocks on local completion. (REMOVE_NOTE: eventually would like a caf_put that doesn't block on local completion).
   * **Procedure Interface**:
     ```
-      subroutine caf_put(coarray_handle, coindices, mold, value, team, team_number, stat) !REMOVE_NOTE_TODO: make sure rename of target dummy arg to mold is changed in other places in doc as well
-        implicit none
-        type(caf_co_handle_t), intent(in) :: coarray_handle
-        integer, intent(in) :: coindices(:)
-        type(*), dimension(..), intent(in) :: mold, value
-        type(team_type), optional, intent(in) :: team
-        integer, optional, intent(in) :: team_number
-        integer, optional, intent(out) :: stat
-      end subroutine
+     ! both sides are contiguous
+     subroutine caf_put(coarray_handle, coindices, value, element_storage_size, first_element_addr, team, team_number, stat)
+       implicit none
+       type(caf_co_handle_t), intent(in) :: coarray_handle
+       integer, intent(in) :: coindices(:)
+       type(*), dimension(..), intent(in), contiguous :: value
+       integer(kind=c_size_t), intent(in) :: element_storage_size
+       type(c_ptr), intent(in) :: first_element_addr ! represents the address in the local slice corresponding to where the first element lives on the remote
+       type(team_type), optional, intent(in) :: team
+       integer, optional, intent(in) :: team_number
+       integer, optional, intent(out) :: stat
+     end subroutine caf_put
     ```
   * **Further argument descriptions**:
     * **`value`**: The value that shall be assigned to (REMOVE_NOTE_TODO: fill in)
 
+
+ #### `caf_put_strided`
+  * **Description**: TODO: fill in
+  * **Procedure Interface**:
+    ```
+     ! more general case
+     subroutine caf_put_strided( &
+         coarray_handle, coindices, value, element_storage_size, &
+         first_element_addr, extent, stride, team, team_number, stat)
+       implicit none
+       type(caf_co_handle_t), intent(in) :: coarray_handle
+       integer, intent(in) :: coindices(:)
+       type(*), dimension(..), intent(in) :: value
+       integer(kind=c_size_t), intent(in) :: element_storage_size
+       type(c_ptr), intent(in) :: first_element_addr ! represents the address in the local slice corresponding to where the first element lives on the remote
+       integer(kind=c_size_t) :: extent(:)
+       integer(kind=c_ptrdiff_t) :: stride(:)
+       type(team_type), optional, intent(in) :: team
+       integer, optional, intent(in) :: team_number
+       integer, optional, intent(out) :: stat
+     end subroutine
+    ```
+  * **Further argument descriptions**:
+    * **`coarray_handle`**:
 
  #### `caf_get`
   * **Description**:
