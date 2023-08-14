@@ -81,6 +81,8 @@ The following table outlines which tasks will be the responsibility of the Fortr
 
 ## Runtime Interface Procedures
 
+TODO: Update this list and links with recently added procedures
+
    **Collectives:**
      [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum)
 
@@ -447,6 +449,36 @@ The following table outlines which tasks will be the responsibility of the Fortr
     ```
   * **Further argument descriptions**:
     * **`coarray_handle`**:
+
+ #### `caf_put_raw`
+  * **Description**: Assign to size number of bytes from image named by coindicies starting at remote pointer, copying from local_buffer.
+  * **Procedure Interface**:
+    ```
+      subroutine caf_put_raw(image_num, local_buffer, remote_ptr, size, stat)
+        implicit none
+        integer(kind=c_int), intent(in) :: image_num
+        type(c_ptr), intent(in) :: local_buffer
+        integer(kind=c_int64_t), intent(in) :: remote_ptr
+        integer(kind=c_size_t), intent(in) :: size
+        integer, optional, intent(out) :: stat
+      end subroutine
+    ```
+
+ #### `caf_put_raw_strided`
+  * **Description**: TODO: (reword) Assign to size number of bytes from image named by coindicies starting at remote pointer, use stride to assign, copying from local_buffer.
+  * **Procedure Interface**:
+    ```
+       subroutine caf_put_raw_strided(image_num, local_buffer, remote_ptr, size, extent, remote_ptr_stride, local_buffer_stride, stat)
+        implicit none
+        integer(kind=c_int), intent(in) :: image_num
+        type(c_ptr), intent(in) :: local_buffer
+        integer(kind=c_int64_t), intent(in) :: remote_ptr
+        integer(kind=c_size_t), intent(in) :: size
+        integer(kind=c_size_t) :: extent(:)
+        integer(kind=c_ptrdiff_t) :: remote_ptr_stride(:), local_buffer_stride(:)
+        integer, optional, intent(out) :: stat
+      end subroutine
+    ```
 
  #### `caf_get`
   * **Description**:
