@@ -58,6 +58,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
 | Track locals coarrays for implicit deallocation when exiting a scope |     ✓     |           |
 | Initialize a coarray with SOURCE= as part of allocate-stmt |     ✓     |           |
 | Provide unique identifiers for location of each `critical-construct` |     ✓     |           |
+| Provide final subroutine for all derived types with allocatable components that appear in a coarray |     ✓     |           |
 | Track coarrays for implicit deallocation at `end-team-stmt`  |           |     ✓     |
 | Allocate and deallocate a coarray       |           |     ✓     |
 | Reference a coindexed-object            |           |     ✓     |
@@ -141,6 +142,11 @@ The following table outlines which tasks will be the responsibility of the Fortr
 
 
 ## Procedure descriptions
+
+### sync-stat-list
+
+  * **`stat`** : TODO
+  * **`errmsg`** : There will be two optional arguments for this, one which is allocatable and one which is not. It is the compiler's responsibility to ensure the appropriate optional argument is passed. The allocatable argument will satisfy Fortan 2023 semantics.
 
 ### Collectives
 
@@ -314,20 +320,36 @@ The following table outlines which tasks will be the responsibility of the Fortr
   * **Description**: This procedure allocates memory for a coarray. Calls to `caf_allocate` will be inserted by the compiler when there is an explicit coarray allocation or a statically declared coarray in the source code. The runtime library will stash away the coshape information at this time in order to internally track it during the lifetime of the coarray.
   * **Procedure Interface**:
     ```
-      subroutine caf_allocate(co_lbounds, co_ubounds, lbounds, ubounds, coarray_handle, local_slice)
+      subroutine caf_allocate(co_lbounds, co_ubounds, lbounds, ubounds, element_length, final_func, coarray_handle, allocated_memory)
         implicit none
         integer(kind=c_intmax_t), dimension(:), intent(in) :: co_lbounds, co_ubounds
         integer(kind=c_intmax_t), dimension(:), intent(in) :: lbounds, ubounds
+        integer(kind=c_size_t) :: element_length
+        type(c_funptr), intent(in) :: final_func
         type(caf_co_handle_t), intent(out) :: coarray_handle
-        ! type(*), dimension(..), allocatable, intent(out) :: local_slice ! REMOVE_NOTE: when testing this interface out, didn't compile because `Assumed-type variable local_slice at (1) may not have the ALLOCATABLE, CODIMENSION, POINTER or VALUE attribute`
-        class(*), dimension(..), allocatable, intent(out) :: local_slice
+        type(c_ptr), intent(out) :: allocated_memory
       end subroutine
     ```
   * **Further argument descriptions**:
-    * **`co_lbounds` and `co_ubounds`**: Shall be the the lower and upper bounds of the coarray being allocated. Shall be 1d arrays with the same dimensions as each other. The product of the difference of the `co_lbounds` and `co_ubounds` shall equal the number of team members (REMOVE_NOTE_TODO: check wording).
+    * **`co_lbounds` and `co_ubounds`**: Shall be the lower and upper bounds of the coarray being allocated. Shall be 1d arrays with the same dimensions as each other. The product of the difference of the `co_lbounds` and `co_ubounds` shall equal the number of team members (REMOVE_NOTE_TODO: check wording).
     * **`lbounds` and `ubounds`**: Shall be the the lower and upper bounds of the `local_slice`. Shall be 1d arrays with the same dimensions as each other.
+    * **`element_length`**: Length of the element in the coarray (REMOVE_NOTE_TODO: reword)
+    * **`final_func`**: (REMOVE_NOTE_TODO: fill in)
     * **`coarray_handle`**: Represents the distributed object of the coarray on the corresponding team. Shall return the handle created by the runtime library that the compiler shall use for future coindexed-object references of the associated coarray and for deallocation of the associated coarray.
-    * **`local_slice`**: Shall not be allocated on entry. Shall return the
+    * **`allocated_memory`**: Shall not be allocated on entry. Shall return the
+
+ #### `caf_allocate_non_symmetric`
+  * **Description**: Use to allocate components of coarray objects. If the object to be allocated is polymorphic, it is the compiler's responsibility to set the dynamic type and it shall not be accessed remotely.
+  * **Procedure Interface**:
+    ```
+     module subroutine caf_allocate_non_symmetric(size_in_bytes, allocated_memory)
+       implicit none
+       integer(kind=c_size_t) :: size_in_bytes
+       type(c_ptr), intent(out) :: allocated_memory
+     end subroutine
+    ```
+  * **Further argument descriptions**:
+    * **``**:
 
  #### `caf_deallocate`
   * **Description**: This procedure releases memory previously allocated for all of the coarrays associated with the handles in `coarray_handles`, resulting in the destruction of any associated `local_slices` received by the compiler after `caf_allocate` calls.  (REMOVE_NOTE_TODO: reword) The compiler will insert calls to this procedure when exiting a local scope where implicit deallocation of a coarray is mandated by the standard and when a coarray is explicitly deallocated through a `deallocate-stmt` in the source code.
@@ -466,6 +488,9 @@ The following table outlines which tasks will be the responsibility of the Fortr
 
 ### Image Synchronization
 
+  Compilers need an "optimization fence",
+  inline assembly available in c/c++ to provide optimization fences
+
  #### `caf_sync_all`
   * **Description**:
   * **Procedure Interface**:
@@ -506,24 +531,26 @@ The following table outlines which tasks will be the responsibility of the Fortr
   * **Further argument descriptions**:
 
  #### `caf_critical`
-  * **Description**:
+  * **Description**: For each critical construct, the compiler shall define a coarray that shall only be used to begin and end the critical block. The coarray shall be a scalar coarray of type lock_type and the associated coarray handle shall be passed to the procedure.
   * **Procedure Interface**:
     ```
-      subroutine caf_critical(critical_id, REMOVE_NOTE_TODO: fill in)
+      subroutine caf_critical(critical_coarray, stat, REMOVE_NOTE_TODO: fill in)
         implicit none
-        integer(kind=c_int64_t), intent(in) :: critical_id
+        type(caf_co_handle_t), intent(in) :: critical_coarray
+        integer, optional, intent(out) :: stat
       end subroutine
     ```
   * **Further argument descriptions**:
-    * **`critical_id`**: shall be a unique identifier for a critical construct. This unique identifier will be used by the runtime library to track the location of the critical construct blocks.
+    * **`critical_coarray`**:
 
 #### `caf_end_critical`
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_end_critical(critical_id, REMOVE_NOTE_TODO: fill in)
+      subroutine caf_end_critical(critical_coarray, REMOVE_NOTE_TODO: fill in)
         implicit none
-        integer(kind=c_int64_t), intent(in) :: critical_id
+        type(caf_co_handle_t), intent(in) :: critical_coarray
+        integer, optional, intent(out) :: stat
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -874,12 +901,13 @@ All atomic operations are blocking operations.
   - REMOVE_NOTE_TODO_DECISION: Need to decide the thread semantics
   - REMOVE_NOTE_TODO_DECISION: Are we going to have Caffeine be thread safe? Have a thread safety option? Is it a build time option? or runtime?
         Dan advocates having a thread-safety option that is build time.
+        Dan advocates having a debug versus optimized compliation mode (Debug mode - does sanity checks of preconditions)
   - Do we need to add any discussion of what it would look like when code has mixed OpenMP and Coarray Fortran?
 
  - boilerplate was added for all of the interfaces and initially everything was made a subroutine
  - when all the interfaces are done, check them to make sure there were no interfaces created that could be a function, but were left a subroutine because forgot to change that aspect of the boilerplate
 
-  - critical construct - need to have a state saying whether we are in a critical construct or not, if we are in one, then we can ignore any further nested critical constructs.
+  - critical construct - if we track state saying whether we are in a critical construct or not, then we can have additional checks for non compliant behavior that are done when in debug mode
 
   - Search for REMOVE_NOTE_TODO_DECISION to find locations where specific decisions/options are outlined, but not yet made.
   - Search for, resolve, and remove all REMOVE_NOTE and REMOVE_NOTE_TODO_DECISIONS before finalizing this document.
@@ -979,6 +1007,7 @@ CAF_ALLOCATE implementation notes:
 
 UNIT TESTS TODOs
   unit test with user code tries to directly call caf_{...} procedures, should be possible for user to do so
+  tests that check to make sure copy in copy out semantics are NOT occurring in the places that it matters
 
 flexible array member in c
 
