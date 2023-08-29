@@ -81,8 +81,6 @@ The following table outlines which tasks will be the responsibility of the Fortr
 
 ## Runtime Interface Procedures
 
-TODO: Update this list and links with recently added procedures
-
    **Collectives:**
      [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum)
 
@@ -90,10 +88,10 @@ TODO: Update this list and links with recently added procedures
      [`caf_init`](#caf_init), [`caf_finalize`](#caf_finalize), [`caf_error_stop`](#caf_error_stop), [`caf_stop`](#caf_stop), [`caf_fail_image`](#caf_fail_image)
 
    **Allocation and deallocation:**
-     [`caf_allocate`](#caf_allocate), [`caf_deallocate`](#caf_deallocate)
+     [`caf_allocate`](#caf_allocate), [`caf_deallocate`](#caf_deallocate), [`caf_allocate_non_symmetric`](#caf_allocate_non_symmetric), [`caf_deallocate_non_symmetric`](#caf_deallocate_non_symmetric)
 
    **Coarray Access:**
-     [`caf_put`](#caf_put), [`caf_get`](#caf_get), [`caf_get_async`](#caf_get_async)
+     [`caf_put`](#caf_put), [`caf_put_raw`](#caf_put_raw), [`caf_put_raw_strided`](#caf_put_raw_strided), [`caf_get`](#caf_get), [`caf_get_raw`](#caf_get_raw), [`caf_get_raw_strided`](#caf_get_raw_strided), [`caf_get_async`](#caf_get_async), [`caf_base_pointer`](#caf_base_pointer)
 
    **Operation Synchronization:**
      [`caf_async_wait_for`](#caf_aync_wait_for), [`caf_async_try_for`](#caf_async_try_for), [`caf_sync_memory`](#caf_sync_memory)
@@ -335,13 +333,13 @@ TODO: Update this list and links with recently added procedures
   * **Further argument descriptions**:
     * **`co_lbounds` and `co_ubounds`**: Shall be the lower and upper bounds of the coarray being allocated. Shall be 1d arrays with the same dimensions as each other. The product of the difference of the `co_lbounds` and `co_ubounds` shall equal the number of team members (REMOVE_NOTE_TODO: check wording).
     * **`lbounds` and `ubounds`**: Shall be the the lower and upper bounds of the `local_slice`. Shall be 1d arrays with the same dimensions as each other.
-    * **`element_length`**: Length of the element in the coarray (REMOVE_NOTE_TODO: reword)
-    * **`final_func`**: (REMOVE_NOTE_TODO: fill in)
+    * **`element_length`**: Length of the element
+    * **`final_func`**: Shall be a function pointer to the final function, if any, for derived types
     * **`coarray_handle`**: Represents the distributed object of the coarray on the corresponding team. Shall return the handle created by the runtime library that the compiler shall use for future coindexed-object references of the associated coarray and for deallocation of the associated coarray.
-    * **`allocated_memory`**: Shall not be allocated on entry. Shall return the
+    * **`allocated_memory`**: Shall not be allocated on entry. Shall return a pointer to the block of allocated memory for the Fortran object.
 
  #### `caf_allocate_non_symmetric`
-  * **Description**: Use to allocate components of coarray objects. If the object to be allocated is polymorphic, it is the compiler's responsibility to set the dynamic type and it shall not be accessed remotely.
+  * **Description**: This procedure allocates components of coarray objects. If the object to be allocated is polymorphic, it is the compiler's responsibility to set the dynamic type and it shall not be accessed remotely.
   * **Procedure Interface**:
     ```
      module subroutine caf_allocate_non_symmetric(size_in_bytes, allocated_memory)
@@ -351,7 +349,8 @@ TODO: Update this list and links with recently added procedures
      end subroutine
     ```
   * **Further argument descriptions**:
-    * **``**:
+    * **`size_in_bytes`**: The size, in bytes, of the object to be allocated.
+    * **`allocated_memory`**: Shall not be allocated on entry. Shall return a pointer to the block of allocated memory for the Fortran object.
 
  #### `caf_deallocate`
   * **Description**: This procedure releases memory previously allocated for all of the coarrays associated with the handles in `coarray_handles`, resulting in the destruction of any associated `local_slices` received by the compiler after `caf_allocate` calls.  (REMOVE_NOTE_TODO: reword) The compiler will insert calls to this procedure when exiting a local scope where implicit deallocation of a coarray is mandated by the standard and when a coarray is explicitly deallocated through a `deallocate-stmt` in the source code.
@@ -366,7 +365,7 @@ TODO: Update this list and links with recently added procedures
     * **`coarray_handles`**: Is an array of all of the handles for the coarrays that shall be deallocated.
 
  #### `caf_deallocate_non_symmetric`
-  * **Description**: TODO: fill in
+  * **Description**: This procedure releases memory previously allocated for a component of a derived type coarray.
   * **Procedure Interface**:
     ```
       subroutine caf_deallocate_non_symmetric(mem)
@@ -375,7 +374,7 @@ TODO: Update this list and links with recently added procedures
       end subroutine
     ```
   * **Argument descriptions**:
-    * **`mem`**:
+    * **`mem`**: Pointer to the block of memory to be released.
 
 
 ### Coarray Access
@@ -406,10 +405,9 @@ TODO: Update this list and links with recently added procedures
     * shall not both be present in the same call
 
  #### `caf_put`
-  * **Description**: This procedure assigns to a coarray. The compiler shall call this procedure when there is a coarray reference that is a `coindexed-object`. The compiler shall not (REMOVE_NOTE: need to?) call this procedure when the coarray reference is not a `coindexed-object`. This procedure blocks on local completion. (REMOVE_NOTE: eventually would like a caf_put that doesn't block on local completion).
+  * **Description**: This procedure assigns to a coarray, when both sides of the assignment are contiguous. The compiler shall call this procedure when there is a coarray reference that is a `coindexed-object`. The compiler shall not (REMOVE_NOTE: need to?) call this procedure when the coarray reference is not a `coindexed-object`. This procedure blocks on local completion. (REMOVE_NOTE: eventually would like a caf_put that doesn't block on local completion).
   * **Procedure Interface**:
     ```
-     ! both sides are contiguous
      subroutine caf_put(coarray_handle, coindices, value, element_storage_size, first_element_addr, team, team_number, stat)
        implicit none
        type(caf_co_handle_t), intent(in) :: coarray_handle
@@ -513,6 +511,50 @@ TODO: Update this list and links with recently added procedures
       end subroutine
     ```
 
+ #### `caf_get_raw`
+  * **Description**:
+  * **Procedure Interface**:
+    ```
+      subroutine caf_get_raw(image_num, local_buffer, remote_ptr, size, stat)
+        implicit none
+        integer(kind=c_int), intent(in) :: image_num
+        type(c_ptr), intent(in) :: local_buffer
+        integer(kind=c_int64_t), intent(in) :: remote_ptr
+        integer(kind=c_size_t), intent(in) :: size
+        integer, optional, intent(out) :: stat
+      end subroutine
+    ```
+
+ #### `caf_get_raw_strided`
+  * **Description**:
+  * **Procedure Interface**:
+    ```
+      subroutine caf_get_raw_strided(image_num, local_buffer, remote_ptr, size, extent, remote_ptr_stride, local_buffer_stride, stat)
+        implicit none
+        integer(kind=c_int), intent(in) :: image_num
+        type(c_ptr), intent(in) :: local_buffer
+        integer(kind=c_int64_t), intent(in) :: remote_ptr
+        integer(kind=c_size_t), intent(in) :: size
+        integer(kind=c_size_t) :: extent(:)
+        integer(kind=c_ptrdiff_t) :: remote_ptr_stride(:), local_buffer_stride(:)
+        integer, optional, intent(out) :: stat
+      end subroutine
+    ```
+
+ #### `caf_base_pointer`
+  * **Description**: This procedure provides a pointer to the base of the coarray elements on a given image and may be used in conjunction with caf_get_raw
+  * **Procedure Interface**:
+    ```
+      function caf_base_pointer(coarray_handle, coindices, team, team_number, stat) result (raw_ptr_int)
+        implicit none
+        type(caf_co_handle_t), intent(in) :: coarray_handle
+        integer, intent(in) :: coindices(:)
+        integer(kind=c_int64_t) :: raw_ptr_int
+        type(team_type), optional, intent(in) :: team
+        integer, optional, intent(in) :: team_number
+        integer, optional, intent(out) :: stat
+      end function
+    ```
 
 ###  Operation Synchronization
 
@@ -602,10 +644,10 @@ TODO: Update this list and links with recently added procedures
   * **Further argument descriptions**:
 
  #### `caf_critical`
-  * **Description**: For each critical construct, the compiler shall define a coarray that shall only be used to begin and end the critical block. The coarray shall be a scalar coarray of type lock_type and the associated coarray handle shall be passed to the procedure.
+  * **Description**: For each critical construct, the compiler shall define a coarray that shall only be used to begin and end the critical block. The coarray shall be a scalar coarray of type `lock_type` and the associated coarray handle shall be passed to the procedure.
   * **Procedure Interface**:
     ```
-      subroutine caf_critical(critical_coarray, stat, REMOVE_NOTE_TODO: fill in)
+      subroutine caf_critical(critical_coarray, stat)
         implicit none
         type(caf_co_handle_t), intent(in) :: critical_coarray
         integer, optional, intent(out) :: stat
@@ -618,10 +660,9 @@ TODO: Update this list and links with recently added procedures
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_end_critical(critical_coarray, REMOVE_NOTE_TODO: fill in)
+      subroutine caf_end_critical(critical_coarray)
         implicit none
         type(caf_co_handle_t), intent(in) :: critical_coarray
-        integer, optional, intent(out) :: stat
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -775,10 +816,24 @@ All atomic operations are blocking operations.
 
  #### `caf_atomic_cas`
   * **Description**:
-  * **Procedure Interface**:
+  * **Procedure Interfaces**:
     ```
-      subroutine caf_atomic_cas(fill in...)
+      subroutine caf_atomic_cas_int_raw(image_num, atom_remote_ptr, old, compare, new, stat)
         implicit none
+        integer, intent(in) :: image_num
+        integer(kind=c_int64_t), intent(in) :: atom_remote_ptr
+        integer(kind=atomic_int_kind), intent(in)  :: compare, new
+        integer(kind=atomic_int_kind), intent(out) :: old
+        integer, optional, intent(out) :: stat
+      end subroutine
+
+      subroutine caf_atomic_cas_logical_raw(image_num, atom_remote_ptr, old, compare, new, stat)
+        implicit none
+        integer, intent(in) :: image_num
+        integer(kind=c_int64_t), intent(in) :: atom_remote_ptr
+        logical(kind=atomic_logical_kind), intent(in)  :: compare, new
+        logical(kind=atomic_logical_kind), intent(out) :: old
+        integer, optional, intent(out) :: stat
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -797,8 +852,13 @@ All atomic operations are blocking operations.
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_atomic_fetch_add(fill in...)
+      subroutine caf_atomic_fetch_add_raw(image_num, atom_remote_ptr, value, old, stat)
         implicit none
+        integer, intent(in) :: image_num
+        integer(kind=c_int64_t), intent(in) :: atom_remote_ptr
+        integer(kind=atomic_int_kind), intent(in)  :: value
+        integer(kind=atomic_int_kind), intent(out) :: old
+        integer, optional, intent(out) :: stat
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -899,9 +959,12 @@ All atomic operations are blocking operations.
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_image_index(fill in...)
+      function caf_image_index(coarray_handle, coindices)
         implicit none
-      end subroutine
+        type(caf_co_handle_t), intent(in) :: coarray_handle
+        integer, intent(in) :: coindices(:)
+        integer(kind=c_int) :: caf_image_index
+      end function
     ```
   * **Further argument descriptions**:
 
@@ -977,6 +1040,10 @@ All atomic operations are blocking operations.
 
  - boilerplate was added for all of the interfaces and initially everything was made a subroutine
  - when all the interfaces are done, check them to make sure there were no interfaces created that could be a function, but were left a subroutine because forgot to change that aspect of the boilerplate
+
+  - TODO: Question, reference standard: Can you explicitly deallocate a coarray in a child team that has been allocated by the parent team?
+  - need to understand more about how the change team construct affects allocation
+
 
   - critical construct - if we track state saying whether we are in a critical construct or not, then we can have additional checks for non compliant behavior that are done when in debug mode
 
