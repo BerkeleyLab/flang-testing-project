@@ -85,7 +85,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
      [`caf_co_broadcast`](#caf_co_broadcast), [`caf_co_max`](#caf_co_max), [`caf_co_min`](#caf_co_min), [`caf_co_reduce`](#caf_co_reduce), [`caf_co_sum`](#caf_co_sum)
 
    **Program startup and shutdown:**
-     [`caf_init`](#caf_init), [`caf_finalize`](#caf_finalize), [`caf_error_stop`](#caf_error_stop), [`caf_stop`](#caf_stop), [`caf_fail_image`](#caf_fail_image)
+     [`caf_init`](#caf_init), [`caf_stop`](#caf_stop), [`caf_error_stop`](#caf_error_stop), [`caf_fail_image`](#caf_fail_image)
 
    **Allocation and deallocation:**
      [`caf_allocate`](#caf_allocate), [`caf_deallocate`](#caf_deallocate), [`caf_allocate_non_symmetric`](#caf_allocate_non_symmetric), [`caf_deallocate_non_symmetric`](#caf_deallocate_non_symmetric)
@@ -248,7 +248,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
 
 ### Program startup and shutdown
 
-  When the compiler identifies a program that uses "Coarray Fortran" features, it will insert calls to `caf_init` and `caf_finalize`. These procedures will initialize and terminate the Coarray Fortran environment.
+  When the compiler identifies a program that uses "Coarray Fortran" features, it will insert calls to `caf_init` and `caf_stop`. These procedures will initialize and terminate the Coarray Fortran environment.
 
  #### `caf_init`
   * **Description**: This procedure will initialize the Coarray Fortran environment.
@@ -261,12 +261,12 @@ The following table outlines which tasks will be the responsibility of the Fortr
     ```
   * **Result**: `exit_code` is an `integer` whose value ... (REMOVE_NOTE_TODO: fill in)
 
-  REMOVE_NOTE: remove caf_finalize, because it has been determined that it iss redundant with caf_stop
- #### `caf_finalize`
+REMOVE_NOTE_TODO: resolve the following two options for caf_stop
+ #### `caf_stop`
   * **Description**: This procedure may or may terminate the Coarray Fortran environment. REMOVE_NOTE_TODO_DECISION: does it terminate for sure or not? can caf_init be called twice?
   * **Procedure Interface**:
     ```
-      subroutine caf_finalize(exit_code)
+      subroutine caf_stop(exit_code)
         implicit none
         integer, intent(in) :: exit_code
       end subroutine
@@ -276,19 +276,6 @@ The following table outlines which tasks will be the responsibility of the Fortr
 
   (REMOVE_NOTE_TODO: check the interfaces for caf_error_stop and caf_stop, currently are same as the procedures in Caffeine, but these interfaces have not yet been discussed and decided upon for the Coarray Fortran Parallel Runtime Library Interface. May need to add something? Change something?)
 
- #### `caf_error_stop`
-  * **Description**: This procedure stops all images and provides the `stop_code` passed, or `0` if no `stop_code` is passed, as the process exit status
-  * **Procedure Interface**: REMOVE_NOTE_TODO_DECISION: should error_stop be implemented with two optional arguments with the precondition that they both shall not be passed at the same time? Or have overloaded procedures?
-    ```
-      subroutine caf_error_stop(stop_code_int, stop_code_char)
-        integer, intent(in), optional :: stop_code_int
-        character(len=*), intent(in), optional :: stop_code_char
-      end subroutine
-    ```
-  * **Further argument descriptions**:
-    * **`stop_code_int` and `stop_code_char`**: shall not both be present in the same call (if provide only one procedure instead of overloading caf_error_stop)
-
- #### `caf_stop`
   * **Description**: This procedure synchronizes and stops the executing image. It provides the `stop_code` or `0` if no `stop_code` is passed, as the process exit status.
   * **Procedure Interface**:  REMOVE_NOTE_TODO_DECISION: should stop be implemented with two optional arguments with the precondition that they both shall not be passed at the same time? Or have overloaded procedures?
     ```
@@ -303,6 +290,17 @@ The following table outlines which tasks will be the responsibility of the Fortr
     * **`stop_code_int` and `stop_code_char`**: shall not both be present in the same call (if provide only one procedure instead of overloading caf_stop)
           * In `caf_stop`, runtime library will need to call c_exit() REMOVE_NOTE_TODO: fix this note
 
+ #### `caf_error_stop`
+  * **Description**: This procedure stops all images and provides the `stop_code` passed, or `0` if no `stop_code` is passed, as the process exit status
+  * **Procedure Interface**: REMOVE_NOTE_TODO_DECISION: should error_stop be implemented with two optional arguments with the precondition that they both shall not be passed at the same time? Or have overloaded procedures?
+    ```
+      subroutine caf_error_stop(stop_code_int, stop_code_char)
+        integer, intent(in), optional :: stop_code_int
+        character(len=*), intent(in), optional :: stop_code_char
+      end subroutine
+    ```
+  * **Further argument descriptions**:
+    * **`stop_code_int` and `stop_code_char`**: shall not both be present in the same call (if provide only one procedure instead of overloading caf_error_stop)
 
  #### `caf_fail_image`
   * **Description**:
