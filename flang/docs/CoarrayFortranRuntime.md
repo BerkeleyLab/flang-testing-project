@@ -8,6 +8,11 @@
 # THIS IS A WORK IN PROGRESS - DECISIONS REGARDING THE DESIGNS DISCUSSED IN THIS DOCUMENT ARE ONGOING AND MAY CHANGE AND THE DOCUMENT IS INCOMPLETE
 
 
+#TODO:
+   add note in an appropriate place about move_alloc when args are coarrays, say that it is the compilers responsibility to use the handles
+provided from runtime library to do necessary swap
+
+
 # Problem description
   In order to be fully Fortran 2018 compliant, Flang needs to add support for what is commonly referred to as coarray fortran, which includes features related to parallelism. These features include the following statements, subroutines, functions, types, and kind type parameters:
 
@@ -103,7 +108,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
      [`caf_event_post`](#caf_event_post), [`caf_event_wait`](#caf_event_wait), [`caf_event_query`](#caf_event_query)
 
    **Teams:**
-     [`caf_change_team`](#caf_change_team), [`caf_end_team`](#caf_end_team), [`caf_form_team`](#caf_form_team), [`caf_sync_team`](#caf_sync_team), [`caf_get_team`](#caf_get_team), [`caf_team_number`](#caf_team_number)
+     [`caf_change_team`](#caf_change_team), [`caf_end_team`](#caf_end_team), [`caf_form_team`](#caf_form_team), [`caf_sync_team`](#caf_sync_team), [`caf_get_team`](#caf_get_team), [`caf_team_number`](#caf_team_number), [`caf_alias_create`](#caf_alias_create), [`caf_alias_destroy`](#caf_alias_destroy)
 
    **Atomic Memory Operation:**
      [`caf_atomic_add`](#caf_atomic_add), [`caf_atomic_and`](#caf_atomic_and), [`caf_atomic_cas`](#caf_atomic_cas), [`caf_atomic_define`](#caf_atomic_define), [`caf_atomic_fetch_add`](#caf_atomic_fetch_add), [`caf_atomic_fetch_and`](#caf_atomic_fetch_and), [`caf_atomic_fetch_or`](#caf_atomic_fetch_or), [`caf_atomic_fetch_xor`](#caf_atomic_fetch_xor), [`caf_atomic_or`](#caf_atomic_or), [`caf_atomic_ref`](#caf_atomic_ref), [`caf_atomic_xor`](#caf_atomic_xor)
@@ -318,9 +323,9 @@ REMOVE_NOTE_TODO: resolve the following two options for caf_stop
   * **Description**: This procedure allocates memory for a coarray. Calls to `caf_allocate` will be inserted by the compiler when there is an explicit coarray allocation or a statically declared coarray in the source code. The runtime library will stash away the coshape information at this time in order to internally track it during the lifetime of the coarray.
   * **Procedure Interface**:
     ```
-      subroutine caf_allocate(co_lbounds, co_ubounds, lbounds, ubounds, element_length, final_func, coarray_handle, allocated_memory)
+      subroutine caf_allocate(lcobounds, ucobounds, lbounds, ubounds, element_length, final_func, coarray_handle, allocated_memory)
         implicit none
-        integer(kind=c_intmax_t), dimension(:), intent(in) :: co_lbounds, co_ubounds
+        integer(kind=c_intmax_t), dimension(:), intent(in) :: lcobounds, ucobounds
         integer(kind=c_intmax_t), dimension(:), intent(in) :: lbounds, ubounds
         integer(kind=c_size_t) :: element_length
         type(c_funptr), intent(in) :: final_func
@@ -329,7 +334,7 @@ REMOVE_NOTE_TODO: resolve the following two options for caf_stop
       end subroutine
     ```
   * **Further argument descriptions**:
-    * **`co_lbounds` and `co_ubounds`**: Shall be the lower and upper bounds of the coarray being allocated. Shall be 1d arrays with the same dimensions as each other. The product of the difference of the `co_lbounds` and `co_ubounds` shall equal the number of team members (REMOVE_NOTE_TODO: check wording).
+    * **`lcobounds` and `ucobounds`**: Shall be the lower and upper bounds of the coarray being allocated. Shall be 1d arrays with the same dimensions as each other. The product of the difference of the `lcobounds` and `ucobounds` shall equal the number of team members (REMOVE_NOTE_TODO: check wording).
     * **`lbounds` and `ubounds`**: Shall be the the lower and upper bounds of the `local_slice`. Shall be 1d arrays with the same dimensions as each other.
     * **`element_length`**: Length of the element
     * **`final_func`**: Shall be a function pointer to the final function, if any, for derived types
@@ -699,25 +704,30 @@ REMOVE_NOTE_TODO: resolve the following two options for caf_stop
   * **Further argument descriptions**:
 
 ### Teams
-  (REMOVE_NOTE_TODO: check the interface for caf_change_team and caf_form_team, currently are same as the procedures in Caffeine, but these interfaces have not yet been discussed and decided upon for the Coarray Fortran Parallel Runtime Library Interface. May need to add something? Change something?)
+  TODO: add general points related to our team design
+  The only time we create a new handle for an established coarray is in a change-team-stmt. The only times we create handles is `caf_allocate`, and a `change-team-stmt`.
 
  #### `caf_change_team`
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_change_team(team)
+      subroutine caf_change_team(team_var, errmsg, stat)
         implicit none
-        type(team_type), target, intent(in) :: team
+        type(caf_team_type_t), intent(in) :: team_var
+        character(len=*), intent(out), optional :: errmsg
+        integer, intent(out), optional :: stat
       end subroutine
     ```
   * **Further argument descriptions**:
 
  #### `caf_end_team`
-  * **Description**:
+  * **Description**: During the execution of `caf_end_team`, the runtime library will implicitly synchronize, as the standard requires and deallocate any coarrays allocated during the change team construct. Prior to `caf_end_team`, the compiler is responsible for invoking [`caf_alias_destroy`](#caf_alias_destroy) for any `caf_co_handle_t` handles created during the change team construct.
   * **Procedure Interface**:
     ```
-      subroutine caf_end_team(fill in...)
+      subroutine caf_end_team(errmsg, stat)
         implicit none
+        character(len=*), intent(out), optional :: errmsg
+        integer, intent(out), optional :: stat
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -726,13 +736,13 @@ REMOVE_NOTE_TODO: resolve the following two options for caf_stop
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_form_team(num, team, new_index, stat, errmsg)
+      subroutine caf_form_team(team_num, team_var, new_index, errmsg, stat)
         implicit none
-        integer,          intent(in)  :: num
-        type(team_type),  intent(out) :: team
-        integer,          intent(in),    optional :: new_index
-        integer,          intent(out),   optional :: stat
-        character(len=*), intent(inout), optional :: errmsg
+        integer(kind=c_int), intent(in) :: team_num
+        type(caf_team_type_t), intent(out) :: team_var
+        integer(kind=c_int), intent(in), optional :: new_index
+        character(len=*), intent(out), optional :: errmsg
+        integer, intent(out), optional :: stat
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -763,6 +773,30 @@ REMOVE_NOTE_TODO: resolve the following two options for caf_stop
     ```
       subroutine caf_team_number(fill in...)
         implicit none
+      end subroutine
+    ```
+  * **Further argument descriptions**:
+
+ #### `caf_alias_create`
+  * **Description**: Create a new coarray handle that may be used for coarray queries about an aliased coarray, such as in a [`caf_change_team`](#caf_change_team)
+  * **Procedure Interface**:
+    ```
+      subroutine caf_alias_create(source_handle, alias_co_lbounds, alias_co_ubounds, alias_handle)
+        implicit none
+        type(caf_co_handle_t), intent(in) :: source_handle
+        integer(kind=c_intmax_t), dimension(:), intent(in) :: alias_co_lbounds, alias_co_ubounds
+        type(caf_co_handle_t), intent(out) :: alias_handle
+      end subroutine
+    ```
+  * **Further argument descriptions**:
+
+ #### `caf_alias_destroy`
+  * **Description**: REMOVE_NOTE_TODO: Keep the alias routines in the Teams section? Move to another more general section?
+  * **Procedure Interface**:
+    ```
+      subroutine caf_alias_destroy(alias_handle)
+        implicit none
+        type(caf_co_handle_t), intent(in) :: alias_handle
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -924,21 +958,46 @@ All atomic operations are blocking operations.
 ### Coarray Queries
 
  #### `caf_lcobound`
-  * **Description**:
+  * **Description**: This procedure returns the lcobounds of the coarray referred to by the coarray_handle. The lcobounds will always be a 64bit integer and it is the compiler's responsibility to convert to a different kind, as needed by the user.
   * **Procedure Interface**:
     ```
-      subroutine caf_lcobound(fill in...)
-        implicit none
+      interface caf_lcobound
+        module procedure caf_lcobound_with_dim
+        module procedure caf_lcobound_no_dim
+      end interface caf_lcobound
+
+      subroutine caf_lcobound_with_dim(coarray_handle, dim, lcobound)
+        type(caf_co_handle_t), intent(in) :: coarray_handle
+        integer, intent(in) :: dim
+        integer(kind=c_int64_t), intent(out) :: lcobound
+      end subroutine
+
+      subroutine caf_lcobound_no_dim(coarray_handle, lcobounds)
+        type(caf_co_handle_t), intent(in) :: coarray_handle
+        integer(kind=c_int64_t), intent(out) :: lcobounds(:)
       end subroutine
     ```
   * **Further argument descriptions**:
 
  #### `caf_ucobound`
-  * **Description**:
+  * **Description**: This procedure returns the ucobounds of the coarray referred to by the coarray_handle. The ucobounds will always be a 64bit integer and it is the compiler's responsibility to convert to a different kind, as needed by the user.
+
   * **Procedure Interface**:
     ```
-      subroutine caf_ucobound(fill in...)
-        implicit none
+      interface caf_ucobound
+        module procedure caf_ucobound_with_dim
+        module procedure caf_ucobound_no_dim
+      end interface
+
+      subroutine caf_ucobound_with_dim(coarray_handle, dim, ucobound)
+        type(caf_co_handle_t), intent(in) :: coarray_handle
+        integer, intent(in) :: dim
+        integer(kind=c_int64_t), intent(out) :: ucobound
+      end subroutine
+
+      subroutine caf_ucobound_no_dim(coarray_handle, ucobounds)
+        type(caf_co_handle_t), intent(in) :: coarray_handle
+        integer(kind=c_int64_t), intent(out) :: ucobounds(:)
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -1027,131 +1086,6 @@ All atomic operations are blocking operations.
 ## Establish and initialize static coarrays prior to `main`
 
   (REMOVE_NOTE: complete this section, potentially move to earlier in doc) Compiler will need to: call caf_init, call caf_allocate ... for each coarray and in the right order. And then copy any initializers.
-
-
-## Internal Development Notes: (REMOVE_NOTES before submission)
-  - REMOVE_NOTE_TODO_DECISION: Need to decide the thread semantics
-  - REMOVE_NOTE_TODO_DECISION: Are we going to have Caffeine be thread safe? Have a thread safety option? Is it a build time option? or runtime?
-        Dan advocates having a thread-safety option that is build time.
-        Dan advocates having a debug versus optimized compliation mode (Debug mode - does sanity checks of preconditions)
-  - Do we need to add any discussion of what it would look like when code has mixed OpenMP and Coarray Fortran?
-
- - boilerplate was added for all of the interfaces and initially everything was made a subroutine
- - when all the interfaces are done, check them to make sure there were no interfaces created that could be a function, but were left a subroutine because forgot to change that aspect of the boilerplate
-
-  - TODO: Question, reference standard: Can you explicitly deallocate a coarray in a child team that has been allocated by the parent team?
-  - need to understand more about how the change team construct affects allocation
-
-
-  - critical construct - if we track state saying whether we are in a critical construct or not, then we can have additional checks for non compliant behavior that are done when in debug mode
-
-  - Search for REMOVE_NOTE_TODO_DECISION to find locations where specific decisions/options are outlined, but not yet made.
-  - Search for, resolve, and remove all REMOVE_NOTE and REMOVE_NOTE_TODO_DECISIONS before finalizing this document.
-
-  - `caf_allocate` - after getting the basic necessities for this procedure sorted, considering adding a mold argument that would allow for dynamic typing for `local_slice`
-
-
-  * **Asynchrony:**
-    -   Could be handle based or fence based approaches
-    -   Handle based - return can individual operation handle, later on compiler synchronizes handle
-    -   Fence based - implicit handle operations, closer to MPI
-
-
-
-POTENTIAL RATIONALE TO PRESENT SOMEWHERE maybe
-The runtime library will handle critical constructs, and not expect the compiler to rewrite them as blocks with lock and unlock statements. This would be burdensome on the compiler because a lock_type variable would need to be declared, but as it needs to be a coarray, it would have to hoist its (REMOVE_NOTE: reword?!?!) declaration.
-
-Same non-blocking semantics (has to be started and finished in the same segment) will likely apply to collectives, use caf_wait_for, caf_try_for, etc
-Should change team and critical be non-blocking? sync-all?)
-
-
-Caffeine internal procedure, so not part of the CAF PRI.
- #### `caf_end_segment`
-  * **Description**: This procedure ends a segment. Any puts that are still in flight will be committed (and any caches will be thrown away REMOVE_NOTE_TODO_DECISION: if we decide to do caches). Calls to this procedure will be side effects of invocations of the image control statements. It is not a synchronizing operation.
-  * **Procedure Interface**:
-  ```
-    subroutine caf_end_segment()
-      implicit none
-      (REMOVE_NOTE: are there no arguments? or is it just that we haven't sketched out the args yet?)
-    end subroutine
-  ```
-
-### `caf_co_handle_t`
-
-   The following is a Fortran heavy pseudo code, not the exact implementation we plan
-   ```
-   type caf_co_handle_t
-     type(c_ptr) :: base_addr
-     integer, allocatable, dimension(:) :: lbounds, sizes
-     !integer :: established_team ! probably not necessary unless we want to bounds check
-   end type
-   ```
-
-REMOVE_NOTEs:
-    allow for non-blocking collective subroutines
-    need to be able to track puts in flight, may need a write buffer, record boundaries in a hash table struct
-    every single rma needs to check the table to see if there is a conflicting overlap
-    could add caching
-    if the constants (stat_failed_image, etc) are compiler provided, we need to get C access to these values
-
-
-#### Implementation internal notes
-  * In `caf_allocate`, add precondition that `lbounds` and `sizes` are the same size - use assert or other similar solution
-  * In `caf_get` (and others?), `source` arg useful to get the "shape" of the thing, not the value of this dummy arg, compiler needs to ensure this dummy arg is not a copy for this strategy to work, compiler's codegen needs to ensure that this (and other subroutine calls) are not using copies for this arg
-  * In `caf_get_async`, the `value` arg may need asynchronous attribute or may be implicitly asynchronous
-
-
-REMOVE_NOTE_
-
-examples where if a user writes this example code, then the compiler should rewrite it to look like this other piece of example code
-
-
-TODO after writing example, try compiling it and see if it compiles at least until breaking at linking because no def for caf_allocate etc
-1. basic caf example
-    - static coarray declaration
-         - transform by adding caf_allocate and caf_deallocate calls
-    - write to coarrays
-    - read from coarrays
-    - sync-all-stmt (?)
-
-2. allocatable coarray example
-    - allocatable coarray with an initializer
-    - compiler transforms code and adds assignment statement after calls to caf_allocate
-
-3. implicit deallocation of a coarray example
-    - local, allocatable coarray -> compiler must insert caf_deallocate call
-    - have multiple coarrays, with only one call to caf_deallocate since it takes an array of handles
-
-4. example with coarray initializer to express the idea written earlier that compiler is reponsible for this
-
-5. include somewhere in examples
-  ! integer :: example[2:4,3:*]
-  ! integer :: example[3:*]
-
-
-
-REMOVE_NOTE_TODO: FIX CAF_ALLOCATE LINK
-
-CAF_ALLOCATE implementation notes:
-  ! figure out how much space it needs, c_size_of
-  ! internally consult its own allocater
-  ! will know the memory address
-  ! associate the allocatable local slice with the local memory
-  ! once caf_allocate returns, example_local_slice will refer to the local slice of the coarray that is in the shared heap
-  ! create meta data block that contains info about a given coarray, stash away the cobounds
-
-
-UNIT TESTS TODOs
-  unit test with user code tries to directly call caf_{...} procedures, should be possible for user to do so
-  tests that check to make sure copy in copy out semantics are NOT occurring in the places that it matters
-
-flexible array member in c
-
-### Caffeine internals for coarray accesses
-  Coarray access could start with image_index, with the same coarray coindicies and team identifier argument
-  and would get back a single integer, which is the image number in that team
-  Then can use that to pass into internal query about team and global image index and can use it to bounds check.
-
 
 # Testing plan
 [tbd]
