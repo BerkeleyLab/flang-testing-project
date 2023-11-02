@@ -1,4 +1,4 @@
-<!--===- docs/CoarrayFortranRuntime.md
+<!--===- docs/ParallelFortranRuntime.md
 
    Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
    See https://llvm.org/LICENSE.txt for license information.
@@ -44,11 +44,11 @@ In addition to being able to support syntax related to the above features, compi
 One consequence of the statements being categorized as image control statements will be the need to restrict code movement by optimizing compilers.
 
 # Proposed solution
-  This design document proposes an interface to support the above features, named Coarray Fortran Parallel Runtime Interface. By defining a library-agnostic interface, we envision facilitating the development of alternative parallel runtime libraries that support the same interface.  One benefit of this approach is the ability to vary the communication substrate. A central aim of this document is to use a parallel runtime interface in standard Fortran syntax, which enables us to leverage Fortran to succinctly express various properties of the procedure interfaces, including argument attributes.  See [Rouson and Bonachea (2022)] for additional details.
+  This design document proposes an interface to support the above features, named Fortran Parallel Runtime Interface. By defining a library-agnostic interface, we envision facilitating the development of alternative parallel runtime libraries that support the same interface.  One benefit of this approach is the ability to vary the communication substrate. A central aim of this document is to use a parallel runtime interface in standard Fortran syntax, which enables us to leverage Fortran to succinctly express various properties of the procedure interfaces, including argument attributes.  See [Rouson and Bonachea (2022)] for additional details.
 
-## Coarray Fortran (CAF) Parallel Runtime Interface
+## Fortran Parallel Runtime Interface (FPRI)
 
-  The Coarray Fortran Parallel Runtime Interface is a proposed interface in which the runtime library is responsible for coarray allocation, deallocation and accesses, image synchronization, atomic operations, events, and teams. In this interface, the compiler is responsible for transforming the source code to add Fortran procedure calls to the necessary runtime library procedures. Below you can find a table showing the delegation of tasks between the compiler and the runtime library. The interface is designed for portability across shared and distributed memory machines, different operating systems, and multiple architectures. The Caffeine implementation, [see below](#caffeine-lbl's-implementation-of-the-coarray-fortran-parallel-runtime-interface), of the Coarray Fortran Parallel Runtime Interface plans to support the following architectures: x86_64, PowerPC64, AArch64, with the possibility of supporting more as requested. Implementations of this interface is intended as an augmentation for the compiler's own runtime library. While the interface can support multiple implementations, we envision needing to build the runtime library as part of installing the compiler. REMOVE_NOTE_TODO: write sentence about how a module will be defined with the procedures. name of module must be: caf_pri.
+  The Fortran Parallel Runtime Interface is a proposed interface in which the runtime library is responsible for coarray allocation, deallocation and accesses, image synchronization, atomic operations, events, and teams. In this interface, the compiler is responsible for transforming the source code to add Fortran procedure calls to the necessary runtime library procedures. Below you can find a table showing the delegation of tasks between the compiler and the runtime library. The interface is designed for portability across shared and distributed memory machines, different operating systems, and multiple architectures. The Caffeine implementation, [see below](#caffeine-lbl's-implementation-of-the-fortran-parallel-runtime-interface), of the Fortran Parallel Runtime Interface plans to support the following architectures: x86_64, PowerPC64, AArch64, with the possibility of supporting more as requested. Implementations of this interface is intended as an augmentation for the compiler's own runtime library. While the interface can support multiple implementations, we envision needing to build the runtime library as part of installing the compiler. REMOVE_NOTE_TODO: write sentence about how a module will be defined with the procedures. name of module must be: caf_pri.
 
 ## Delegation of tasks between the Fortran compiler and the runtime library
 
@@ -108,7 +108,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
      [`caf_event_post`](#caf_event_post), [`caf_event_wait`](#caf_event_wait), [`caf_event_query`](#caf_event_query)
 
    **Teams:**
-     [`caf_change_team`](#caf_change_team), [`caf_end_team`](#caf_end_team), [`caf_form_team`](#caf_form_team), [`caf_sync_team`](#caf_sync_team), [`caf_get_team`](#caf_get_team), [`caf_team_number`](#caf_team_number), [`caf_alias_create`](#caf_alias_create), [`caf_alias_destroy`](#caf_alias_destroy)
+     [`caf_change_team`](#caf_change_team), [`caf_end_team`](#caf_end_team), [`caf_form_team`](#caf_form_team), [`caf_sync_team`](#caf_sync_team), [`caf_get_team`](#caf_get_team), [`caf_team_number`](#caf_team_number)
 
    **Atomic Memory Operation:**
      [`caf_atomic_add`](#caf_atomic_add), [`caf_atomic_and`](#caf_atomic_and), [`caf_atomic_cas`](#caf_atomic_cas), [`caf_atomic_define`](#caf_atomic_define), [`caf_atomic_fetch_add`](#caf_atomic_fetch_add), [`caf_atomic_fetch_and`](#caf_atomic_fetch_and), [`caf_atomic_fetch_or`](#caf_atomic_fetch_or), [`caf_atomic_fetch_xor`](#caf_atomic_fetch_xor), [`caf_atomic_or`](#caf_atomic_or), [`caf_atomic_ref`](#caf_atomic_ref), [`caf_atomic_xor`](#caf_atomic_xor)
@@ -120,8 +120,8 @@ The following table outlines which tasks will be the responsibility of the Fortr
      [`caf_num_images`](#caf_num_images), [`caf_this_image`](#caf_this_image), [`caf_failed_images`](#caf_failed_images), [`caf_stopped_images`](#caf_stopped_images), [`caf_image_status`](#caf_image_status)
 
 
-### Caffeine - LBL's Implementation of the Coarray Fortran Parallel Runtime Interface
-  Implementations of some parts of the Coarray Fortran Parallel Runtime Interface exist in [Caffeine], a parallel runtime library targeting coarray Fortran compilers. Caffeine will continue to be developed in order to fully implement the proposed Coarray Fortran Parallel Runtime Interface. Caffeine uses the [GASNet-EX] exascale networking middleware but with the library-agnostic interface and the ability to vary the communication substrate, it might also be possible to develop wrappers that would support the proposed interface with [OpenCoarrays], which uses the Message Passing Interface ([MPI]).
+### Caffeine - LBL's Implementation of the Fortran Parallel Runtime Interface
+  Implementations of some parts of the Fortran Parallel Runtime Interface exist in [Caffeine], a parallel runtime library targeting coarray Fortran compilers. Caffeine will continue to be developed in order to fully implement the proposed Fortran Parallel Runtime Interface. Caffeine uses the [GASNet-EX] exascale networking middleware but with the library-agnostic interface and the ability to vary the communication substrate, it might also be possible to develop wrappers that would support the proposed interface with [OpenCoarrays], which uses the Message Passing Interface ([MPI]).
 
 
 ## Types Descriptions
@@ -178,7 +178,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
     * if an error condition occurs, an explanatory message is assigned to the argument
 
 
-  (REMOVE_NOTE_TODO: check the interfaces for these collectives, currently are same as the procedures in Caffeine, but these interfaces have not yet been discussed and decided upon for the Coarray Fortran Parallel Runtime Library Interface. May need to add something?)
+  (REMOVE_NOTE_TODO: check the interfaces for these collectives, currently are same as the procedures in Caffeine, but these interfaces have not yet been discussed and decided upon for the Fortran Parallel Runtime Interface. May need to add something?)
 
  #### `caf_co_broadcast`
   * **Description**:
@@ -253,10 +253,10 @@ The following table outlines which tasks will be the responsibility of the Fortr
 
 ### Program startup and shutdown
 
-  When the compiler identifies a program that uses "Coarray Fortran" features, it will insert calls to `caf_init` and `caf_stop`. These procedures will initialize and terminate the Coarray Fortran environment.
+  When the compiler identifies a program that uses parallel Fortran features, it will insert calls to `caf_init` and `caf_stop`. These procedures will initialize and terminate the parallel Fortran environment.
 
  #### `caf_init`
-  * **Description**: This procedure will initialize the Coarray Fortran environment.
+  * **Description**: This procedure will initialize the parallel Fortran environment.
   * **Procedure Interface**:
     ```
       function caf_init() result(exit_code)
@@ -268,7 +268,7 @@ The following table outlines which tasks will be the responsibility of the Fortr
 
 REMOVE_NOTE_TODO: resolve the following two options for caf_stop
  #### `caf_stop`
-  * **Description**: This procedure may or may terminate the Coarray Fortran environment. REMOVE_NOTE_TODO_DECISION: does it terminate for sure or not? can caf_init be called twice?
+  * **Description**: This procedure may or may terminate the parallel Fortran environment. REMOVE_NOTE_TODO_DECISION: does it terminate for sure or not? can caf_init be called twice?
   * **Procedure Interface**:
     ```
       subroutine caf_stop(exit_code)
@@ -279,7 +279,7 @@ REMOVE_NOTE_TODO: resolve the following two options for caf_stop
   * **Further argument descriptions**:
     * **`exit_code`**: is .. (REMOVE_NOTE_TODO: fill in)
 
-  (REMOVE_NOTE_TODO: check the interfaces for caf_error_stop and caf_stop, currently are same as the procedures in Caffeine, but these interfaces have not yet been discussed and decided upon for the Coarray Fortran Parallel Runtime Library Interface. May need to add something? Change something?)
+  (REMOVE_NOTE_TODO: check the interfaces for caf_error_stop and caf_stop, currently are same as the procedures in Caffeine, but these interfaces have not yet been discussed and decided upon for the Fortran Parallel Runtime Interface. May need to add something? Change something?)
 
   * **Description**: This procedure synchronizes and stops the executing image. It provides the `stop_code` or `0` if no `stop_code` is passed, as the process exit status.
   * **Procedure Interface**:  REMOVE_NOTE_TODO_DECISION: should stop be implemented with two optional arguments with the precondition that they both shall not be passed at the same time? Or have overloaded procedures?
@@ -704,6 +704,7 @@ REMOVE_NOTE_TODO: resolve the following two options for caf_stop
   * **Further argument descriptions**:
 
 ### Teams
+  (REMOVE_NOTE_TODO: check the interface for caf_change_team and caf_form_team, currently are same as the procedures in Caffeine, but these interfaces have not yet been discussed and decided upon for the Coarray Fortran Parallel Runtime Library Interface. May need to add something? Change something?)
   TODO: add general points related to our team design
   The only time we create a new handle for an established coarray is in a change-team-stmt. The only times we create handles is `caf_allocate`, and a `change-team-stmt`.
 
@@ -711,23 +712,19 @@ REMOVE_NOTE_TODO: resolve the following two options for caf_stop
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_change_team(team_var, errmsg, stat)
+      subroutine caf_change_team(team)
         implicit none
-        type(caf_team_type_t), intent(in) :: team_var
-        character(len=*), intent(out), optional :: errmsg
-        integer, intent(out), optional :: stat
+        type(team_type), target, intent(in) :: team
       end subroutine
     ```
   * **Further argument descriptions**:
 
  #### `caf_end_team`
-  * **Description**: During the execution of `caf_end_team`, the runtime library will implicitly synchronize, as the standard requires and deallocate any coarrays allocated during the change team construct. Prior to `caf_end_team`, the compiler is responsible for invoking [`caf_alias_destroy`](#caf_alias_destroy) for any `caf_co_handle_t` handles created during the change team construct.
+  * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_end_team(errmsg, stat)
+      subroutine caf_end_team(fill in...)
         implicit none
-        character(len=*), intent(out), optional :: errmsg
-        integer, intent(out), optional :: stat
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -736,13 +733,13 @@ REMOVE_NOTE_TODO: resolve the following two options for caf_stop
   * **Description**:
   * **Procedure Interface**:
     ```
-      subroutine caf_form_team(team_num, team_var, new_index, errmsg, stat)
+      subroutine caf_form_team(num, team, new_index, stat, errmsg)
         implicit none
-        integer(kind=c_int), intent(in) :: team_num
-        type(caf_team_type_t), intent(out) :: team_var
-        integer(kind=c_int), intent(in), optional :: new_index
-        character(len=*), intent(out), optional :: errmsg
-        integer, intent(out), optional :: stat
+        integer,          intent(in)  :: num
+        type(team_type),  intent(out) :: team
+        integer,          intent(in),    optional :: new_index
+        integer,          intent(out),   optional :: stat
+        character(len=*), intent(inout), optional :: errmsg
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -773,30 +770,6 @@ REMOVE_NOTE_TODO: resolve the following two options for caf_stop
     ```
       subroutine caf_team_number(fill in...)
         implicit none
-      end subroutine
-    ```
-  * **Further argument descriptions**:
-
- #### `caf_alias_create`
-  * **Description**: Create a new coarray handle that may be used for coarray queries about an aliased coarray, such as in a [`caf_change_team`](#caf_change_team)
-  * **Procedure Interface**:
-    ```
-      subroutine caf_alias_create(source_handle, alias_co_lbounds, alias_co_ubounds, alias_handle)
-        implicit none
-        type(caf_co_handle_t), intent(in) :: source_handle
-        integer(kind=c_intmax_t), dimension(:), intent(in) :: alias_co_lbounds, alias_co_ubounds
-        type(caf_co_handle_t), intent(out) :: alias_handle
-      end subroutine
-    ```
-  * **Further argument descriptions**:
-
- #### `caf_alias_destroy`
-  * **Description**: REMOVE_NOTE_TODO: Keep the alias routines in the Teams section? Move to another more general section?
-  * **Procedure Interface**:
-    ```
-      subroutine caf_alias_destroy(alias_handle)
-        implicit none
-        type(caf_co_handle_t), intent(in) :: alias_handle
       end subroutine
     ```
   * **Further argument descriptions**:
@@ -1029,7 +1002,7 @@ All atomic operations are blocking operations.
 
  #### `caf_num_images`
   * **Description**:
-  * **Procedure Interface**:   (REMOVE_NOTE_TODO: check the interface for caf_num_images, currently is same as the procedure in Caffeine, but this interface has not yet been discussed and decided upon for the Coarray Fortran Parallel Runtime Library Interface. May need to add something? Change something?)
+  * **Procedure Interface**:   (REMOVE_NOTE_TODO: check the interface for caf_num_images, currently is same as the procedure in Caffeine, but this interface has not yet been discussed and decided upon for the Fortran Parallel Runtime Interface. May need to add something? Change something?)
     ```
       function caf_num_images(team, team_number) result(image_count)
         implicit none
