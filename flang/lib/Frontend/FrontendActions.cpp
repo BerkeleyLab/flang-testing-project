@@ -372,6 +372,7 @@ bool CodeGenAction::beginSourceFileAction() {
         clang::DiagnosticsEngine::Error,
         "verification of lowering to FIR failed");
     ci.getDiagnostics().Report(diagID);
+    mlirModule->print(llvm::errs(), mlir::OpPrintingFlags().assumeVerified());
     return false;
   }
 

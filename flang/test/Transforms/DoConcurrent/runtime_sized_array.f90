@@ -19,11 +19,10 @@ end subroutine
 
 ! CHECK-DAG: %[[I_DECL:.*]]:2 = hlfir.declare %{{.*}} {uniq_name = "_QFfooEi"}
 ! CHECK-DAG: %[[A_DECL:.*]]:2 = hlfir.declare %{{.*}}(%{{.*}}) {uniq_name = "_QFfooEa"}
-! CHECK-DAG: %[[N_ALLOC:.*]] = fir.alloca i32
 
-! CHECK-DAG: %[[I_MAP:.*]] = omp.map.info var_ptr(%[[I_DECL]]#1 : {{.*}})
-! CHECK-DAG: %[[A_MAP:.*]] = omp.map.info var_ptr(%[[A_DECL]]#1 : {{.*}})
-! CHECK-DAG: %[[N_MAP:.*]] = omp.map.info var_ptr(%[[N_ALLOC]] : {{.*}})
+! CHECK-DAG: %[[I_MAP:.*]] = omp.map.info var_ptr(%[[I_DECL]]#1 : {{.*}}) {{.*}} {name = "_QFfooEi"}
+! CHECK-DAG: %[[A_MAP:.*]] = omp.map.info var_ptr(%[[A_DECL]]#1 : {{.*}}) {{.*}} {name = "_QFfooEa"}
+! CHECK-DAG: %[[N_MAP:.*]] = omp.map.info var_ptr(%{{.*}} : {{.*}}) {{.*}} {name = "_QFfooEa.extent.dim0"}
 
 ! CHECK: omp.target
 ! CHECK-SAME: map_entries(%[[I_MAP]] -> %[[I_ARG:arg[0-9]*]],

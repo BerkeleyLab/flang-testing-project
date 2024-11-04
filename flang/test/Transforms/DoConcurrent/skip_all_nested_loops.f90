@@ -32,8 +32,11 @@ end
 ! DEVICE: omp.target {{.*}}map_entries(%{{[^[:space:]]+}} -> %[[I_ARG:[^,]+]],
 ! DEVICE-SAME:   %{{[^[:space:]]+}} -> %[[J_ARG:[^,]+]],
 ! DEVICE-SAME:   %{{[^[:space:]]+}} -> %[[K_ARG:[^,]+]],
-! DEVICE-SAME:   %{{[^[:space:]]+}} -> %[[A_ARG:[^:]+]]:
-! DEVICE-SAME:   !fir.ref<i32>, !fir.ref<i32>, !fir.ref<i32>, !fir.ref<!fir.array<10x20x30xi32>>) {
+! DEVICE-SAME:   %{{[^[:space:]]+}} -> %[[A_ARG:[^,]+]],
+! DEVICE-SAME:   %{{[^[:space:]]+}} -> %{{[^,]+}},
+! DEVICE-SAME:   %{{[^[:space:]]+}} -> %{{[^,]+}},
+! DEVICE-SAME:   %{{[^[:space:]]+}} -> %{{[^:]+}} :
+! DEVICE-SAME:   {{.*}}) {
 
 ! DEVICE: %[[TARGET_J_DECL:.*]]:2 = hlfir.declare %[[J_ARG]] {uniq_name = "_QFEj"}
 ! DEVICE: %[[TARGET_K_DECL:.*]]:2 = hlfir.declare %[[K_ARG]] {uniq_name = "_QFEk"}

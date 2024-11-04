@@ -23,7 +23,7 @@ program do_concurrent_basic
 
     ! CHECK-DAG: %[[I_MAP_INFO:.*]] = omp.map.info var_ptr(%[[I_ORIG_DECL]]#1
     ! CHECK: %[[C0:.*]] = arith.constant 0 : index
-    ! CHECK: %[[UPPER_BOUND:.*]] = arith.subi %[[A_EXTENT]], %[[C0]] : index
+    ! CHECK: %[[UPPER_BOUND:.*]] = arith.subi %[[A_EXTENT]], %{{c1.*}} : index
 
     ! CHECK: %[[A_BOUNDS:.*]] = omp.map.bounds lower_bound(%[[C0]] : index)
     ! CHECK-SAME: upper_bound(%[[UPPER_BOUND]] : index)
