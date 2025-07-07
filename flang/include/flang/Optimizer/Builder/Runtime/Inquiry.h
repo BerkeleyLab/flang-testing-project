@@ -60,5 +60,7 @@ mlir::Value genIsContiguous(fir::FirOpBuilder &builder, mlir::Location loc,
 mlir::Value genIsContiguousUpTo(fir::FirOpBuilder &builder, mlir::Location loc,
                                 mlir::Value array, mlir::Value dim);
 
+mlir::Value genSizeInBytes(fir::FirOpBuilder &builder, mlir::Location loc,
+                           mlir::Value desc);
 } // namespace fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_INQUIRY_H

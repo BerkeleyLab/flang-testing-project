@@ -93,5 +93,9 @@ void RTDEF(Lbound)(void *result, const Descriptor &array, int kind,
   }
 }
 
+std::size_t RTDEF(SizeInBytes)(const Descriptor &desc) {
+  return desc.SizeInBytes();
+}
+
 } // extern "C"
 } // namespace Fortran::runtime

@@ -100,8 +100,7 @@ mlir::Value genByteOffset(Fortran::lower::AbstractConverter &converter,
                           mlir::Location loc);
 
 mlir::Value getSizeInBytes(fir::FirOpBuilder &builder, mlir::Location loc,
-                           mlir::Type ty,
-                           llvm::SmallVector<mlir::Value> extents);
+                           fir::ExtendedValue box);
 
 //===----------------------------------------------------------------------===//
 // COARRAY memory management
@@ -117,14 +116,12 @@ genAllocateCoarrayRuntimeCall(fir::FirOpBuilder &builder, mlir::Location loc,
 
 mlir::Value genAllocateCoarray(Fortran::lower::AbstractConverter &converter,
                                mlir::Location loc, const semantics::Symbol &sym,
-                               fir::MutableBoxValue,
-                               llvm::SmallVector<mlir::Value>,
-                               mlir::Value errMsgAddr);
+                               fir::MutableBoxValue, mlir::Value errMsgAddr);
 
 std::pair<mlir::Value, mlir::Value>
 genAllocateCoarray(Fortran::lower::AbstractConverter &converter,
                    mlir::Location loc, const semantics::Symbol &sym,
-                   mlir::Type allocTy, llvm::SmallVector<mlir::Value> extents);
+                   fir::ExtendedValue preAlloc);
 
 mlir::Value genDeallocateCoarray(Fortran::lower::AbstractConverter &converter,
                                  mlir::Location loc, fir::MutableBoxValue box,

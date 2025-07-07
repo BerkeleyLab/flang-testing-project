@@ -91,3 +91,25 @@ void fir::runtime::genAllocatableAllocate(fir::FirOpBuilder &builder,
                                     hasStat, errMsg, sourceFile, sourceLine)};
   builder.create<fir::CallOp>(loc, func, args);
 }
+
+void fir::runtime::genAllocatableAllocateSource(
+    fir::FirOpBuilder &builder, mlir::Location loc, mlir::Value desc,
+    mlir::Value source, mlir::Value hasStat, mlir::Value errMsg) {
+  mlir::func::FuncOp func{
+      fir::runtime::getRuntimeFunc<mkRTKey(AllocatableAllocateSource)>(
+          loc, builder)};
+  mlir::FunctionType fTy{func.getFunctionType()};
+  mlir::Value sourceFile{fir::factory::locationToFilename(builder, loc)};
+  mlir::Value sourceLine{
+      fir::factory::locationToLineNo(builder, loc, fTy.getInput(5))};
+  if (!hasStat)
+    hasStat = builder.createBool(loc, false);
+  if (!errMsg) {
+    mlir::Type boxNoneTy = fir::BoxType::get(builder.getNoneType());
+    errMsg = builder.create<fir::AbsentOp>(loc, boxNoneTy).getResult();
+  }
+  llvm::SmallVector<mlir::Value> args{
+      fir::runtime::createArguments(builder, loc, fTy, desc, source, hasStat,
+                                    errMsg, sourceFile, sourceLine)};
+  builder.create<fir::CallOp>(loc, func, args);
+}

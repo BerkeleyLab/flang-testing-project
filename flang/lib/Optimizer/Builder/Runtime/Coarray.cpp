@@ -10,6 +10,7 @@
 #include "flang/Optimizer/Builder/Character.h"
 #include "flang/Optimizer/Builder/FIRBuilder.h"
 #include "flang/Optimizer/Builder/MutableBox.h"
+#include "flang/Optimizer/Builder/Runtime/Allocatable.h"
 #include "flang/Optimizer/Builder/Runtime/Coarray.h"
 #include "flang/Optimizer/Builder/Runtime/Derived.h"
 #include "flang/Optimizer/Builder/Runtime/RTBuilder.h"
@@ -48,6 +49,8 @@ mlir::Value fir::runtime::getCoarrayHandle(fir::FirOpBuilder &builder,
       addr = op.getMemref();
     } else if (auto op = mlir::dyn_cast<hlfir::DesignateOp>(defOp)) {
       addr = op.getMemref();
+    } else if (auto op = mlir::dyn_cast<fir::ConvertOp>(defOp)) {
+      addr = op.getValue();
     } else {
       break;
     }
@@ -107,7 +110,8 @@ void fir::runtime::genStopCoarray(fir::FirOpBuilder &builder,
                                   mlir::Value stopCodeInt,
                                   mlir::Value stopCodeChar, bool isError) {
   mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
-  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy);
+  mlir::Type boxTy = fir::BoxType::get(builder.getNoneType());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, boxTy);
   mlir::func::FuncOp funcOp = builder.createFunction(
       loc, isError ? PRIFNAME_SUB("error_stop") : PRIFNAME_SUB("stop"), ftype);
 
@@ -695,8 +699,12 @@ void genOperationWrapperRuntimeCall(fir::FirOpBuilder &builder,
       builder.create<fir::CallOp>(loc, funcOp, opArgs).getResult(0);
 
   // Storing result
-  if (!mlir::dyn_cast<fir::BoxCharType>(resultType))
-    builder.create<fir::StoreOp>(loc, result, addr_arg2_and_out);
+  if (!mlir::dyn_cast<fir::BoxCharType>(resultType)) {
+    if (!isStaticallyAbsent(addr_arg2_and_out))
+      builder.create<fir::StoreOp>(loc, result, addr_arg2_and_out);
+    else
+      builder.create<fir::StoreOp>(loc, result, arg2_and_out);
+  }
 }
 
 // Generate operation wrapper just like describe in PRIF specification
@@ -724,6 +732,8 @@ mlir::Value genOperationWrapper(fir::FirOpBuilder &builder, mlir::Location loc,
     mlir::SymbolRefAttr symbolAttr = addrOfOp.getSymbolAttr();
     oldFuncOp = module.lookupSymbol<mlir::func::FuncOp>(symbolAttr);
     argTy = oldFuncOp.getFunctionType().getResult(0);
+    if (!fir::isa_box_type(argTy) && !fir::isa_ref_type(argTy))
+      argTy = builder.getRefType(argTy);
     elemTy = fir::unwrapRefType(argTy);
   }
 

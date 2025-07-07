@@ -36,12 +36,14 @@
 #include "flang/Optimizer/Builder/CUFCommon.h"
 #include "flang/Optimizer/Builder/Character.h"
 #include "flang/Optimizer/Builder/FIRBuilder.h"
+#include "flang/Optimizer/Builder/Runtime/Allocatable.h"
 #include "flang/Optimizer/Builder/Runtime/Assign.h"
 #include "flang/Optimizer/Builder/Runtime/Character.h"
 #include "flang/Optimizer/Builder/Runtime/Coarray.h"
 #include "flang/Optimizer/Builder/Runtime/Derived.h"
 #include "flang/Optimizer/Builder/Runtime/EnvironmentDefaults.h"
 #include "flang/Optimizer/Builder/Runtime/Exceptions.h"
+#include "flang/Optimizer/Builder/Runtime/Inquiry.h"
 #include "flang/Optimizer/Builder/Runtime/Main.h"
 #include "flang/Optimizer/Builder/Runtime/Ragged.h"
 #include "flang/Optimizer/Builder/Runtime/Stop.h"
@@ -668,15 +670,35 @@ public:
         *this, loc, coarrayRef, handle);
     builder->create<fir::StoreOp>(loc, index, imageNum);
 
-    // Create and allocate destination vvalue.
+    // Create and allocate destination value.
     mlir::Type resultType = fir::getBaseTypeOf(addr);
-    mlir::Value dest = builder->createTemporary(loc, resultType);
-    mlir::Value destBox = builder->createBox(loc, dest);
+    fir::ExtendedValue dest;
+    mlir::Value destBox;
+    fir::SequenceType maybeSeqType = mlir::dyn_cast<fir::SequenceType>(resultType);
+    if (maybeSeqType && fir::sequenceWithNonConstantShape(maybeSeqType)) {
+      const fir::BoxValue *box = addr.getBoxOf<fir::BoxValue>();
+      mlir::Type resultArrayType = builder->getVarLenSeqTy(fir::getElementTypeOf(addr), addr.rank());
+      fir::MutableBoxValue mutBox =
+        fir::factory::createTempMutableBox(*builder, loc, resultArrayType);
+      fir::factory::getMutableIRBox(*builder, loc, mutBox);
+      dest = mutBox;
+      mlir::Value one = builder->createIntegerConstant(loc, builder->getI32Type(), 1);
+      for (unsigned i = 0; i < addr.rank(); i++) {
+        mlir::Value extent = fir::factory::readExtent(*builder, loc, *box, i);
+        mlir::Value dim = builder->createIntegerConstant(loc, builder->getI32Type(), i);
+        fir::runtime::genAllocatableSetBounds(*builder, loc, fir::getBase(dest), dim, /*lower*/one, extent);
+      }
+      fir::runtime::genAllocatableAllocate(*builder, loc, fir::getBase(mutBox));
+      fir::factory::syncMutableBoxFromIRBox(*builder, loc, mutBox);
+      context.attachCleanup(
+          [=]() { fir::factory::genFreemem(*builder, loc, mutBox); });
+    } else {
+      dest = builder->createTemporary(loc, resultType);
+    }
+    destBox = fir::getBase(fir::factory::createBoxValue(*builder, loc, dest));
 
-    mlir::Type i64Ty = builder->getI64Type();
-    // Getting offset from expr
     mlir::Value offset = Fortran::lower::genByteOffset(*this, expr, loc);
-
+    mlir::Type i64Ty = builder->getI64Type();
     if (std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)) {
       // Handle strides information from subscript
       auto [remoteStride, extents] = genStrideAndExtents(expr, loc);
@@ -724,8 +746,8 @@ public:
                       const Fortran::evaluate::CoarrayRef &coarrayRef,
                       Fortran::lower::StatementContext &context,
                       mlir::Location loc) {
-    fir::ExtendedValue addr = genCoarrayExpr(expr, coarrayRef, context, loc);
-    return builder->create<fir::LoadOp>(loc, fir::getBase(addr));
+    fir::ExtendedValue exv = genCoarrayExpr(expr, coarrayRef, context, loc);
+    return builder->create<fir::LoadOp>(loc, fir::getBase(exv));
   }
 
   fir::ExtendedValue
@@ -733,8 +755,8 @@ public:
                     const Fortran::evaluate::CoarrayRef &coarrayRef,
                     Fortran::lower::StatementContext &context,
                     mlir::Location loc) {
-    fir::ExtendedValue addr = genCoarrayExpr(expr, coarrayRef, context, loc);
-    return builder->createBox(loc, addr);
+    fir::ExtendedValue exv = genCoarrayExpr(expr, coarrayRef, context, loc);
+    return fir::factory::createBoxValue(*builder, loc, exv);
   }
 
   fir::ExtendedValue
@@ -5147,6 +5169,56 @@ private:
     }
     builder.setInsertionPointAfter(regionAssignOp);
   }
+  
+  std::pair<mlir::Value, mlir::Value>
+  genBounds(mlir::Location loc, fir::FirOpBuilder &builder, fir::ExtendedValue box, unsigned i) {
+    mlir::Value one = builder.createIntegerConstant(loc, builder.getI64Type(), 1);
+    mlir::Value lbound = builder.createConvert(loc, builder.getI64Type(), fir::getBase(fir::factory::readLowerBound(builder, loc, box, i, one)));
+    mlir::Value extent = builder.createConvert(loc, builder.getI64Type(), fir::getBase(fir::factory::readExtent(builder, loc, box, i)));
+    mlir::Value ubound = builder.create<mlir::arith::AddIOp>(loc, lbound, extent);
+    ubound = builder.create<mlir::arith::SubIOp>(loc, ubound, one);
+    return {lbound, ubound};
+  }
+  
+  std::pair<mlir::Value, mlir::Value>
+  genStrideAndExtents(fir::ExtendedValue exvBase, mlir::Location loc) {
+    std::optional<mlir::DataLayout> dl =
+        fir::support::getOrSetMLIRDataLayout(builder->getModule(),
+                                             /*allowDefaultLayout*/ true);
+    mlir::Type i64Ty = builder->getI64Type();
+    mlir::Type addrTy = builder->getRefType(i64Ty);
+    mlir::Value strideInBytes;
+    if (auto tsa =
+        fir::getTypeSizeAndAlignment(loc, fir::getElementTypeOf(exvBase),
+                                     *dl, builder->getKindMap())) {
+      strideInBytes = builder->createIntegerConstant(loc, i64Ty, tsa.value().first);
+    } else {
+      strideInBytes = fir::runtime::genSizeInBytes(*builder, loc, fir::getBase(exvBase));
+    }
+    size_t rank = exvBase.rank();
+    mlir::Type arrayTy = fir::SequenceType::get(
+        {static_cast<fir::SequenceType::Extent>(rank)}, i64Ty);
+    mlir::Value extents = builder->createTemporary(loc, arrayTy);
+    mlir::Value strides = builder->createTemporary(loc, arrayTy);
+    for (size_t index = 0; index < rank; index++) {
+      mlir::Value idx = builder->createIntegerConstant(
+          loc, builder->getIndexType(), (rank - 1) - index);
+      mlir::Value strideAddr =
+          builder->create<fir::CoordinateOp>(loc, addrTy, strides, idx);
+      mlir::Value extAddr =
+          builder->create<fir::CoordinateOp>(loc, addrTy, extents, idx);
+
+      mlir::Value extent = builder->createConvert(
+          loc, i64Ty, fir::factory::readExtent(*builder, loc, exvBase, index));
+      builder->create<fir::StoreOp>(loc, extent, extAddr);
+      builder->create<fir::StoreOp>(loc, strideInBytes, strideAddr);
+      strideInBytes =
+          builder->create<mlir::arith::MulIOp>(loc, strideInBytes, extent);
+    }
+    strides = builder->createBox(loc, strides);
+    extents = builder->createBox(loc, extents);
+    return {strides, extents};
+  }
 
   std::pair<mlir::Value, mlir::Value>
   genStrideAndExtents(const Fortran::semantics::SomeExpr &expr,
@@ -5158,35 +5230,46 @@ private:
     mlir::Type i64Ty = builder->getI64Type();
     mlir::Type addrTy = builder->getRefType(i64Ty);
     if (auto dataRef{Fortran::evaluate::ExtractDataRef(expr)}) {
-      const Fortran::semantics::Symbol *sym = &dataRef->GetFirstSymbol();
-      size_t rank = sym->Rank();
-      if (const auto *ref{
+      std::vector<Fortran::evaluate::Subscript> subscript;
+      if (auto coref{Fortran::evaluate::ExtractCoarrayRef(expr)}) {
+        if (const auto *ref{std::get_if<Fortran::evaluate::ArrayRef>(&coref->base().u)})  {
+          subscript = ref->subscript();
+        }
+      } else if (const auto *ref{
               std::get_if<Fortran::evaluate::ArrayRef>(&dataRef->u)}) {
+        subscript = ref->subscript();
+      }
+      if (subscript.size() > 0) {
+        size_t rank = subscript.size();
         mlir::Type arrayTy = fir::SequenceType::get(
             {static_cast<fir::SequenceType::Extent>(rank)}, i64Ty);
         mlir::Value extents = builder->createTemporary(loc, arrayTy);
         mlir::Value strides = builder->createTemporary(loc, arrayTy);
 
-        fir::ExtendedValue exvBase = getSymbolExtendedValue(*sym, nullptr);
+        fir::ExtendedValue exvBase;
+        if (Fortran::lower::SymbolBox sb = lookupSymbol(dataRef->GetLastSymbol(), nullptr)) {
+          exvBase = getSymbolExtendedValue(dataRef->GetLastSymbol(), nullptr);
+        } else {
+          exvBase = Fortran::lower::convertExprToBox(
+                loc, *this, expr, localSymbols, stmtCtx);
+          auto designate = fir::getBase(exvBase).getDefiningOp<hlfir::DesignateOp>();
+          exvBase = fir::factory::createBoxValue(*builder, loc, designate.getMemref());
+        }
         hlfir::Entity base{Fortran::lower::extendedValueToHlfirEntity(
             loc, *builder, exvBase, ".tmp.base_stride_and_ext")};
-        size_t size =
+        mlir::Value strideInBytes;
+        if (auto tsa =
             fir::getTypeSizeAndAlignment(loc, fir::getElementTypeOf(exvBase),
-                                         *dl, builder->getKindMap())
-                ->first;
+                                         *dl, builder->getKindMap())) {
+          strideInBytes = builder->createIntegerConstant(loc, i64Ty, tsa.value().first);
+        } else {
+          strideInBytes = fir::runtime::genSizeInBytes(*builder, loc, fir::getBase(exvBase));
+        }
         llvm::SmallVector<std::pair<mlir::Value, mlir::Value>> bounds;
         auto getBaseBounds = [&](unsigned i) {
-          if (bounds.empty()) {
-            bounds = hlfir::genBounds(loc, *builder, base);
-            assert(!bounds.empty() &&
-                   "failed to compute implicit array section bounds");
-          }
-          return bounds[i];
+            return genBounds(loc, *builder, exvBase, i);
         };
-
-        mlir::Value strideInBytes =
-            builder->createIntegerConstant(loc, i64Ty, size);
-        for (auto ss : llvm::enumerate(ref->subscript())) {
+        for (auto ss : llvm::enumerate(subscript)) {
           mlir::Value idx = builder->createIntegerConstant(
               loc, builder->getIndexType(), (rank - 1) - ss.index());
           mlir::Value strideAddr =
@@ -5205,10 +5288,11 @@ private:
                       auto ubExpr = ignoreEvConvert(trip.upper().value());
                       ub = fir::getBase(genExprValue(ubExpr, stmtCtx));
                     }
-                    if (!lb)
-                      lb = getBaseBounds(ss.index()).first;
-                    if (!ub)
-                      ub = getBaseBounds(ss.index()).second;
+                    if (!lb || !ub) {
+                      auto bounds = getBaseBounds(ss.index());
+                      lb = !lb ? bounds.first : lb;
+                      ub = !ub ? bounds.second : ub;
+                    }
                     auto strideExpr = ignoreEvConvert(trip.stride());
                     stride = builder->createConvert(
                         loc, i64Ty,
@@ -5223,8 +5307,8 @@ private:
                     builder->create<fir::StoreOp>(loc, strideInBytes,
                                                   strideAddr);
                     mlir::Value extentBase = builder->createConvert(
-                        loc, i64Ty,
-                        hlfir::genExtent(loc, *builder, base, ss.index()));
+                        loc, i64Ty, fir::factory::readExtent(*builder, loc, exvBase, ss.index())
+                        );
                     strideInBytes = builder->create<mlir::arith::MulIOp>(
                         loc, strideInBytes, extentBase);
                   },
@@ -5239,14 +5323,20 @@ private:
                           fir::factory::readExtent(*builder, loc, vector,
                                                    ss.index()));
                     } else {
-                      extent = builder->createIntegerConstant(
-                          loc, builder->getI64Type(), 1);
-                      builder->create<fir::StoreOp>(loc, extent, extAddr);
+                      extent = fir::getBase(
+                          genExprValue(ignoreEvConvert(expr.value()), stmtCtx));
+                      extent = builder->createConvert(
+                          loc, builder->getI64Type(), extent);
                     }
+                    mlir::Value extentStride = builder->createConvert(
+                        loc, i64Ty,
+                        fir::factory::readExtent(*builder, loc, exvBase,
+                                                 ss.index()));
+                    builder->create<fir::StoreOp>(loc, extent, extAddr);
                     builder->create<fir::StoreOp>(loc, strideInBytes,
                                                   strideAddr);
                     strideInBytes = builder->create<mlir::arith::MulIOp>(
-                        loc, strideInBytes, extent);
+                        loc, strideInBytes, extentStride);
                   }},
               ss.value().u);
         }
@@ -5256,38 +5346,57 @@ private:
       }
     }
 
-    fir::ExtendedValue exv = Fortran::lower::convertExprToAddress(
+    fir::ExtendedValue exv = Fortran::lower::convertExprToBox(
         loc, *this, expr, localSymbols, stmtCtx);
-    size_t size = fir::getTypeSizeAndAlignment(loc, fir::getElementTypeOf(exv),
-                                               *dl, builder->getKindMap())
-                      ->first;
-    mlir::Value strideInBytes =
-        builder->createIntegerConstant(loc, i64Ty, size);
-    hlfir::Entity base = Fortran::lower::convertExprToHLFIR(
-        loc, *this, expr, localSymbols, stmtCtx);
-    size_t rank = exv.rank();
-    mlir::Type arrayTy = fir::SequenceType::get(
-        {static_cast<fir::SequenceType::Extent>(rank)}, i64Ty);
-    mlir::Value extents = builder->createTemporary(loc, arrayTy);
-    mlir::Value strides = builder->createTemporary(loc, arrayTy);
-    for (size_t index = 0; index < rank; index++) {
-      mlir::Value idx = builder->createIntegerConstant(
-          loc, builder->getIndexType(), (rank - 1) - index);
-      mlir::Value strideAddr =
-          builder->create<fir::CoordinateOp>(loc, addrTy, strides, idx);
-      mlir::Value extAddr =
-          builder->create<fir::CoordinateOp>(loc, addrTy, extents, idx);
+    return genStrideAndExtents(exv, loc);
+  }
 
-      mlir::Value extent = builder->createConvert(
-          loc, i64Ty, hlfir::genExtent(loc, *builder, base, index));
-      builder->create<fir::StoreOp>(loc, extent, extAddr);
-      builder->create<fir::StoreOp>(loc, strideInBytes, strideAddr);
-      strideInBytes =
-          builder->create<mlir::arith::MulIOp>(loc, strideInBytes, extent);
+  mlir::Value genScalarToArray(mlir::Location loc, mlir::Value initVal, 
+                               fir::ExtendedValue dest, 
+                               Fortran::lower::StatementContext &stmtCtx) {
+    mlir::Type destBaseTy = fir::getBaseTypeOf(dest);
+    fir::SequenceType maybeSeqType = mlir::dyn_cast<fir::SequenceType>(destBaseTy);
+    if (maybeSeqType && fir::sequenceWithNonConstantShape(maybeSeqType)) {
+      if (fir::isa_ref_type(initVal.getType()) && !fir::isa_box_type(initVal.getType()))
+        initVal = builder->createBox(loc, initVal);
+      mlir::Type resultArrayType = 
+        builder->getVarLenSeqTy(fir::getElementTypeOf(dest), dest.rank());
+      fir::MutableBoxValue mutBox =
+        fir::factory::createTempMutableBox(*builder, loc, resultArrayType);
+      fir::factory::getMutableIRBox(*builder, loc, mutBox);
+      const fir::BoxValue *box = dest.getBoxOf<fir::BoxValue>();
+      mlir::Value one = builder->createIntegerConstant(loc, builder->getI32Type(), 1);
+      for (unsigned i = 0; i < mutBox.rank(); i++) {
+        mlir::Value extent = fir::factory::readExtent(*builder, loc, *box, i);
+        mlir::Value dim = builder->createIntegerConstant(loc, builder->getI32Type(), i);
+        fir::runtime::genAllocatableSetBounds(*builder, loc, fir::getBase(mutBox), dim, /*lower*/one, extent);
+      }
+      fir::runtime::genAllocatableAllocateSource(*builder, loc, fir::getBase(mutBox), initVal);
+      fir::factory::syncMutableBoxFromIRBox(*builder, loc, mutBox);
+      mlir::Value load = builder->create<fir::LoadOp>(loc, fir::getBase(mutBox));
+      mlir::Value memref = builder->createBox(loc, load);
+      stmtCtx.attachCleanup(
+          [=]() { fir::factory::genFreemem(*builder, loc, mutBox); });
+      return memref;
+    } else {
+      auto arrayInitialValue = builder->create<fir::UndefOp>(loc, maybeSeqType);
+      llvm::SmallVector<int64_t> rangeBounds;
+      for (int64_t extent : maybeSeqType.getShape()) {
+        rangeBounds.push_back(0);
+        if (extent == fir::SequenceType::getUnknownExtent())
+          rangeBounds.push_back(1);
+        else
+          rangeBounds.push_back(extent - 1);
+      }
+      if (fir::isa_ref_type(initVal.getType()))
+        initVal = builder->create<fir::LoadOp>(loc, initVal);
+      mlir::Value array = builder->create<fir::InsertOnRangeOp>(
+         loc, maybeSeqType, arrayInitialValue, initVal,
+         builder->getIndexVectorAttr(rangeBounds));
+      mlir::Value result = builder->createTemporary(loc, maybeSeqType);
+      builder->create<fir::StoreOp>(loc, array, result);
+      return builder->createBox(loc, result);
     }
-    strides = builder->createBox(loc, strides);
-    extents = builder->createBox(loc, extents);
-    return {strides, extents};
   }
 
   /// Generate an coarray assignment.
@@ -5300,22 +5409,36 @@ private:
     Fortran::lower::StatementContext stmtCtx;
     std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
         builder->getModule(), /*allowDefaultLayout*/ true);
-    fir::ExtendedValue lhsExv;
+    fir::ExtendedValue lhsExv, rhsExv;
     if (lowerToHighLevelFIR()) {
       lhsExv = Fortran::lower::convertExprToAddress(loc, *this, assign.lhs,
                                                     localSymbols, stmtCtx);
+      rhsExv = genExprAddr(assign.rhs, stmtCtx);
     } else {
       TODO(loc, "assignement with a coarray.");
     }
     // Getting the current_image_buffer
-    mlir::Value rhs = fir::getBase(genExprAddr(assign.rhs, stmtCtx));
-    mlir::Type ptrTy =
-        mlir::isa<fir::BaseBoxType>(rhs.getType())
-            ? (mlir::Type)fir::BoxType::get(builder->getNoneType())
-            : (mlir::Type)fir::PointerType::get(builder->getNoneType());
-    mlir::Value currentImageBuffer = builder->createTemporary(loc, ptrTy);
-    mlir::Value rhsPtr = builder->createConvert(loc, ptrTy, rhs);
-    builder->create<fir::StoreOp>(loc, rhsPtr, currentImageBuffer);
+    mlir::Value currentImageBuffer;
+    mlir::Value rhs = fir::getBase(rhsExv);
+    mlir::Type rhsBaseTy = fir::getBaseTypeOf(rhsExv);
+    mlir::Type lhsBaseTy = fir::getBaseTypeOf(lhsExv);
+    fir::SequenceType maybeLhsSeqType = mlir::dyn_cast<fir::SequenceType>(lhsBaseTy);
+    fir::SequenceType maybeRhsSeqType = mlir::dyn_cast<fir::SequenceType>(rhsBaseTy);
+    if (!maybeRhsSeqType && maybeLhsSeqType) {
+      mlir::Value initialValue =
+          fir::isa_char(rhs.getType())
+              ? rhs
+              : fir::getBase(genExprBox(loc, assign.rhs, stmtCtx));
+      currentImageBuffer = genScalarToArray(loc, initialValue, lhsExv, stmtCtx);
+    } else {
+      mlir::Type ptrTy =
+          mlir::isa<fir::BaseBoxType>(rhs.getType())
+              ? (mlir::Type)fir::BoxType::get(builder->getNoneType())
+              : (mlir::Type)fir::PointerType::get(builder->getNoneType());
+      mlir::Value rhsPtr = builder->createConvert(loc, ptrTy, rhs);
+      currentImageBuffer = builder->createTemporary(loc, ptrTy);
+      builder->create<fir::StoreOp>(loc, rhsPtr, currentImageBuffer);
+    }
 
     // Getting the coarray_handle entity from the left expression
     mlir::Value handle =
@@ -5335,8 +5458,9 @@ private:
     if (std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)) {
       // Handle strides information from subscript
       auto [remoteStride, extents] = genStrideAndExtents(assign.lhs, loc);
-      mlir::Value currentImageStride =
-          genStrideAndExtents(assign.rhs, loc).first;
+      mlir::Value currentImageStride = (!maybeRhsSeqType && maybeLhsSeqType) 
+        ? genStrideAndExtents(fir::factory::createBoxValue(*builder, loc, currentImageBuffer), loc).first 
+        : genStrideAndExtents(assign.rhs, loc).first;
 
       size_t size =
           fir::getTypeSizeAndAlignmentOrCrash(
@@ -5375,22 +5499,36 @@ private:
     Fortran::lower::StatementContext stmtCtx;
     std::optional<mlir::DataLayout> dl = fir::support::getOrSetMLIRDataLayout(
         builder->getModule(), /*allowDefaultLayout*/ true);
-    fir::ExtendedValue rhsExv;
+    fir::ExtendedValue rhsExv, lhsExv;
     if (lowerToHighLevelFIR()) {
       rhsExv = Fortran::lower::convertExprToAddress(loc, *this, assign.rhs,
                                                     localSymbols, stmtCtx);
+      lhsExv = genExprAddr(assign.lhs, stmtCtx);
     } else {
       TODO(loc, "assignement with a coarray.");
     }
     // Getting the current_image_buffer
-    mlir::Value lhs = fir::getBase(genExprAddr(assign.lhs, stmtCtx));
-    mlir::Type ptrTy =
-        mlir::isa<fir::BaseBoxType>(lhs.getType())
-            ? (mlir::Type)fir::BoxType::get(builder->getNoneType())
-            : (mlir::Type)fir::PointerType::get(builder->getNoneType());
-    mlir::Value currentImageBuffer = builder->createTemporary(loc, ptrTy);
-    mlir::Value lhsPtr = builder->createConvert(loc, ptrTy, lhs);
-    builder->create<fir::StoreOp>(loc, lhsPtr, currentImageBuffer);
+    mlir::Value currentImageBuffer;
+    mlir::Value lhs = fir::getBase(lhsExv);
+    mlir::Type rhsBaseTy = fir::getBaseTypeOf(rhsExv);
+    mlir::Type lhsBaseTy = fir::getBaseTypeOf(lhsExv);
+    fir::SequenceType maybeLhsSeqType = mlir::dyn_cast<fir::SequenceType>(lhsBaseTy);
+    fir::SequenceType maybeRhsSeqType = mlir::dyn_cast<fir::SequenceType>(rhsBaseTy);
+    if (maybeRhsSeqType && !maybeLhsSeqType) {
+      mlir::Value initialValue =
+          fir::isa_char(lhs.getType())
+              ? lhs
+              : fir::getBase(genExprBox(loc, assign.lhs, stmtCtx));
+      currentImageBuffer = genScalarToArray(loc, initialValue, rhsExv, stmtCtx);
+    } else {
+      mlir::Type ptrTy =
+          mlir::isa<fir::BaseBoxType>(lhs.getType())
+              ? (mlir::Type)fir::BoxType::get(builder->getNoneType())
+              : (mlir::Type)fir::PointerType::get(builder->getNoneType());
+      currentImageBuffer = builder->createTemporary(loc, ptrTy);
+      mlir::Value lhsPtr = builder->createConvert(loc, ptrTy, lhs);
+      builder->create<fir::StoreOp>(loc, lhsPtr, currentImageBuffer);
+    }
 
     // Getting the coarray_handle entity from the left expression
     mlir::Value handle =
@@ -5407,12 +5545,12 @@ private:
     mlir::Value offset = Fortran::lower::genByteOffset(*this, assign.rhs, loc);
 
     mlir::Type i64Ty = builder->getI64Type();
-    if (auto *arrayRef{
-            std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)}) {
+    if (std::get_if<Fortran::evaluate::ArrayRef>(&coarrayRef.base().u)) {
       // Handle strides information from subscript
       auto [remoteStride, extents] = genStrideAndExtents(assign.rhs, loc);
-      mlir::Value currentImageStride =
-          genStrideAndExtents(assign.lhs, loc).first;
+      mlir::Value currentImageStride = (maybeRhsSeqType && !maybeLhsSeqType)
+        ? genStrideAndExtents(fir::factory::createBoxValue(*builder, loc, currentImageBuffer), loc).first 
+        : genStrideAndExtents(assign.lhs, loc).first;
 
       size_t size =
           fir::getTypeSizeAndAlignmentOrCrash(

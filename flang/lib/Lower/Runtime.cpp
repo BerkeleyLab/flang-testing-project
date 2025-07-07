@@ -124,7 +124,8 @@ void Fortran::lower::genStopStatement(
               builder.createConvert(loc, calleeType.getInput(0), x.getAddr()));
           operands.push_back(
               builder.createConvert(loc, calleeType.getInput(1), x.getLen()));
-          stopCodeChar = x.getAddr();
+          stopCodeChar =
+              fir::getBase(fir::factory::createBoxValue(builder, loc, x));
         },
         [&](fir::UnboxedValue x) {
           callee = fir::runtime::getRuntimeFunc<mkRTKey(StopStatement)>(

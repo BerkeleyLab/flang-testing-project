@@ -51,5 +51,11 @@ void genAllocatableAllocate(fir::FirOpBuilder &builder, mlir::Location loc,
                             mlir::Value desc, mlir::Value hasStat = {},
                             mlir::Value errMsg = {});
 
+/// Generate runtime call to allocate an allocatable entity
+/// as described by the given \p desc descriptor and initialize with source
+void genAllocatableAllocateSource(fir::FirOpBuilder &builder,
+                                  mlir::Location loc, mlir::Value desc,
+                                  mlir::Value source, mlir::Value hasStat = {},
+                                  mlir::Value errMsg = {});
 } // namespace fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_ALLOCATABLE_H

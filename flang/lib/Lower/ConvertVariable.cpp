@@ -31,6 +31,7 @@
 #include "flang/Optimizer/Builder/FIRBuilder.h"
 #include "flang/Optimizer/Builder/HLFIRTools.h"
 #include "flang/Optimizer/Builder/IntrinsicCall.h"
+#include "flang/Optimizer/Builder/Runtime/Coarray.h"
 #include "flang/Optimizer/Builder/Runtime/Derived.h"
 #include "flang/Optimizer/Builder/Todo.h"
 #include "flang/Optimizer/Dialect/CUF/CUFOps.h"
@@ -2444,11 +2445,37 @@ void Fortran::lower::mapSymbolAttributes(
   }
 
   if (Fortran::evaluate::IsCoarray(sym)) {
-    mlir::Type baseType = fir::unwrapRefType(addr.getType());
-    if (auto boxTy = mlir::dyn_cast<fir::BaseBoxType>(addr.getType()))
-      baseType = boxTy.getEleTy();
-    auto [addrCoarray, coarrayHandle] = Fortran::lower::genAllocateCoarray(
-        converter, loc, sym, baseType, extents);
+    if (auto seqTy = fir::unwrapUntilSeqType(addr.getType())) {
+      if (fir::sequenceWithNonConstantShape(seqTy))
+        TODO(loc, "Allocation of coarray with non constant shape.");
+    }
+    fir::ExtendedValue preAllocExv;
+    if (ba.isChar()) {
+      if (ba.isArray())
+        preAllocExv = fir::CharArrayBoxValue{addr, len, extents};
+      else
+        preAllocExv = fir::CharBoxValue{addr, len};
+    } else
+      preAllocExv = addr;
+    auto [addrCoarray, coarrayHandle] =
+        Fortran::lower::genAllocateCoarray(converter, loc, sym, preAllocExv);
+    if (var.isGlobal()) {
+      std::string globalName = converter.mangleName(sym) + "_coarray_handle";
+      fir::GlobalOp global = builder.getNamedGlobal(globalName);
+      if (!global) {
+        global = builder.createGlobal(loc, coarrayHandle.getType(), globalName,
+                                      builder.createLinkOnceLinkage());
+        createGlobalInitialization(builder, global, [&](fir::FirOpBuilder &b) {
+          auto box = fir::factory::createUnallocatedBox(
+              builder, loc, coarrayHandle.getType(),
+              /*nonDeferredParams=*/std::nullopt);
+          b.create<fir::HasValueOp>(loc, box);
+        });
+      }
+      auto addrOf = builder.create<fir::AddrOfOp>(loc, global.resultType(),
+                                                  global.getSymbol());
+      builder.create<fir::StoreOp>(loc, coarrayHandle, addrOf);
+    }
     ::genDeclareSymbol(converter, symMap, sym, addrCoarray, len, extents,
                        lbounds, replace, coarrayHandle);
     return;

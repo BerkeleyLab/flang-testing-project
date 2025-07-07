@@ -127,3 +127,12 @@ void fir::runtime::genShape(fir::FirOpBuilder &builder, mlir::Location loc,
       builder, loc, fTy, resultAddr, array, kind, sourceFile, sourceLine);
   builder.create<fir::CallOp>(loc, func, args);
 }
+
+mlir::Value fir::runtime::genSizeInBytes(fir::FirOpBuilder &builder,
+                                         mlir::Location loc, mlir::Value desc) {
+  mlir::func::FuncOp func =
+      fir::runtime::getRuntimeFunc<mkRTKey(SizeInBytes)>(loc, builder);
+  auto fTy = func.getFunctionType();
+  auto args = fir::runtime::createArguments(builder, loc, fTy, desc);
+  return builder.create<fir::CallOp>(loc, func, args).getResult(0);
+}

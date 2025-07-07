@@ -21,7 +21,9 @@ void RTNAME(ComputeLastUcobound)(
   for (int i = 0; i < corank - 1; i++) {
     index *= ucobounds_ptr[i] - lcobounds_ptr[i] + 1;
   }
-  if (index < num_images)
+  if (corank == 1)
+    ucobounds_ptr[0] = lcobounds_ptr[0] + num_images;
+  else if (index < num_images)
     ucobounds_ptr[corank - 1] =
         (num_images / index) + (num_images % index != 0);
 }
