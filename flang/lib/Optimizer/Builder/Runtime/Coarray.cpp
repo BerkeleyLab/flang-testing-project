@@ -1169,3 +1169,19 @@ void fir::runtime::genEndCriticalStatement(fir::FirOpBuilder &builder,
       fir::runtime::createArguments(builder, loc, ftype, coarrayHandle);
   builder.create<fir::CallOp>(loc, funcOp, localArgs);
 }
+
+/// Generate Call to runtime prif_failed_images or prif_stopped_images
+void fir::runtime::genFailedStoppedImages(fir::FirOpBuilder &builder,
+                                          mlir::Location loc,
+                                          mlir::Value resultBox,
+                                          mlir::Value team, bool isFailed) {
+  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy);
+  mlir::func::FuncOp funcOp = builder.createFunction(
+      loc,
+      isFailed ? PRIFNAME_SUB("failed_images") : PRIFNAME_SUB("stopped_images"),
+      ftype);
+  llvm::SmallVector<mlir::Value> localArgs =
+      fir::runtime::createArguments(builder, loc, ftype, team, resultBox);
+  builder.create<fir::CallOp>(loc, funcOp, localArgs);
+}

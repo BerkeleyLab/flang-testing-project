@@ -281,6 +281,8 @@ struct IntrinsicLibrary {
                                       llvm::ArrayRef<fir::ExtendedValue>);
   template <Extremum, ExtremumBehavior>
   mlir::Value genExtremum(mlir::Type, llvm::ArrayRef<mlir::Value>);
+  fir::ExtendedValue genFailedImages(mlir::Type,
+                                     llvm::ArrayRef<fir::ExtendedValue>);
   mlir::Value genFloor(mlir::Type, llvm::ArrayRef<mlir::Value>);
   mlir::Value genFraction(mlir::Type resultType,
                           mlir::ArrayRef<mlir::Value> args);
@@ -448,6 +450,8 @@ struct IntrinsicLibrary {
   mlir::Value genSpacing(mlir::Type resultType,
                          llvm::ArrayRef<mlir::Value> args);
   fir::ExtendedValue genSpread(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);
+  fir::ExtendedValue genStoppedImages(mlir::Type,
+                                      llvm::ArrayRef<fir::ExtendedValue>);
   fir::ExtendedValue genStorageSize(mlir::Type,
                                     llvm::ArrayRef<fir::ExtendedValue>);
   fir::ExtendedValue genSum(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);

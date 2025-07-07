@@ -568,6 +568,10 @@ static constexpr IntrinsicHandler handlers[]{
      &I::genExtendsTypeOf,
      {{{"a", asBox}, {"mold", asBox}}},
      /*isElemental=*/false},
+    {"failed_images",
+     &I::genFailedImages,
+     {{{"team", asBox, handleDynamicOptional}, {"kind", asValue}}},
+     /*isElemental=*/false},
     {"findloc",
      &I::genFindloc,
      {{{"array", asBox},
@@ -1049,6 +1053,10 @@ static constexpr IntrinsicHandler handlers[]{
     {"spread",
      &I::genSpread,
      {{{"source", asBox}, {"dim", asValue}, {"ncopies", asValue}}},
+     /*isElemental=*/false},
+    {"stopped_images",
+     &I::genStoppedImages,
+     {{{"team", asBox, handleDynamicOptional}, {"kind", asValue}}},
      /*isElemental=*/false},
     {"storage_size",
      &I::genStorageSize,
@@ -4540,6 +4548,39 @@ IntrinsicLibrary::genFindloc(mlir::Type resultType,
                                 mask, kind, back);
   }
   return readAndAddCleanUp(resultMutableBox, resultType, "FINDLOC");
+}
+
+// FAILED_IMAGES
+fir::ExtendedValue
+IntrinsicLibrary::genFailedImages(mlir::Type,
+                                  llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 2);
+  mlir::Value team = isStaticallyAbsent(args[0])
+                         ? builder.create<fir::AbsentOp>(
+                               loc, fir::BoxType::get(builder.getNoneType()))
+                         : fir::getBase(args[0]);
+  // Generate result descriptor
+  mlir::Type resultArrayType = builder.getVarLenSeqTy(builder.getI64Type(), 1);
+  fir::MutableBoxValue resultMutableBox =
+      fir::factory::createTempMutableBox(builder, loc, resultArrayType);
+  mlir::Value resultIrBox =
+      fir::factory::getMutableIRBox(builder, loc, resultMutableBox);
+  mlir::Value zero =
+      builder.createIntegerConstant(loc, builder.getI32Type(), 0);
+  mlir::Value one = builder.createIntegerConstant(loc, builder.getI32Type(), 1);
+  mlir::Value num_images = fir::runtime::getNumImages(builder, loc);
+
+  fir::runtime::genAllocatableSetBounds(
+      builder, loc, fir::getBase(resultMutableBox), /*dim*/ zero, /*lower*/ one,
+      /*upper*/ num_images);
+  fir::runtime::genAllocatableAllocate(builder, loc,
+                                       fir::getBase(resultMutableBox));
+  fir::factory::syncMutableBoxFromIRBox(builder, loc, resultMutableBox);
+
+  fir::runtime::genFailedStoppedImages(builder, loc, resultIrBox, team,
+                                       /*isFailed*/ true);
+  return readAndAddCleanUp(resultMutableBox, builder.getI64Type(),
+                           "FAILED_IMAGES");
 }
 
 // FLOOR
@@ -8854,6 +8895,37 @@ IntrinsicLibrary::genSpread(mlir::Type resultType,
   fir::runtime::genSpread(builder, loc, resultIrBox, source, dim, ncopies);
 
   return readAndAddCleanUp(resultMutableBox, resultType, "SPREAD");
+}
+
+// STOPPED_IMAGES
+fir::ExtendedValue
+IntrinsicLibrary::genStoppedImages(mlir::Type,
+                                   llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 2);
+  mlir::Value team = isStaticallyAbsent(args[0])
+                         ? builder.create<fir::AbsentOp>(
+                               loc, fir::BoxType::get(builder.getNoneType()))
+                         : fir::getBase(args[0]);
+  // Generate result descriptor
+  mlir::Type resultArrayType = builder.getVarLenSeqTy(builder.getI64Type(), 1);
+  fir::MutableBoxValue resultMutableBox =
+      fir::factory::createTempMutableBox(builder, loc, resultArrayType);
+  fir::factory::getMutableIRBox(builder, loc, resultMutableBox);
+  mlir::Value zero =
+      builder.createIntegerConstant(loc, builder.getI32Type(), 0);
+  mlir::Value one = builder.createIntegerConstant(loc, builder.getI32Type(), 1);
+  mlir::Value num_images = fir::runtime::getNumImages(builder, loc);
+
+  fir::runtime::genAllocatableSetBounds(
+      builder, loc, fir::getBase(resultMutableBox), /*dim*/ zero, /*lower*/ one,
+      /*upper*/ num_images);
+  fir::runtime::genAllocatableAllocate(builder, loc,
+                                       fir::getBase(resultMutableBox));
+  fir::factory::syncMutableBoxFromIRBox(builder, loc, resultMutableBox);
+  fir::runtime::genFailedStoppedImages(
+      builder, loc, fir::getBase(resultMutableBox), team, /*isFailed*/ false);
+  return readAndAddCleanUp(resultMutableBox, builder.getI64Type(),
+                           "STOPPED_IMAGES");
 }
 
 // STORAGE_SIZE

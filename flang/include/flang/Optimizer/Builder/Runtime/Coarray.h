@@ -281,5 +281,10 @@ void genCriticalStatement(fir::FirOpBuilder &builder, mlir::Location loc,
 void genEndCriticalStatement(fir::FirOpBuilder &builder, mlir::Location loc,
                      mlir::Value coarrayHandle);
 
+/// Generate Call to runtime prif_failed_images or runtime prif_stopped_images
+void genFailedStoppedImages(fir::FirOpBuilder &builder, mlir::Location loc,
+                            mlir::Value resultBox, mlir::Value team,
+                            bool isFailed);
+
 } // fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_COARRAY_H
