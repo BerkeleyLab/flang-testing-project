@@ -37,6 +37,26 @@ static bool isStaticallyAbsent(const fir::ExtendedValue &exv) {
 mlir::Value fir::runtime::getCoarrayHandle(fir::FirOpBuilder &builder,
                                            mlir::Location loc,
                                            mlir::Value addr) {
+  if (auto designate =
+          mlir::dyn_cast<hlfir::DesignateOp>(addr.getDefiningOp())) {
+    if (auto compName = designate.getComponent()) {
+      std::string globalName =
+          compName.value().getValue().str() + "_coarray_handle";
+      while (auto designateComp = mlir::dyn_cast<hlfir::DesignateOp>(
+                 designate.getMemref().getDefiningOp())) {
+        globalName = designateComp.getComponent().value().getValue().str() +
+                     "_" + globalName;
+        designate = designateComp;
+      }
+      auto declare = designate.getMemref().getDefiningOp<hlfir::DeclareOp>();
+      globalName = declare.getUniqName().getValue().str() + "_" + globalName;
+      mlir::SymbolRefAttr symAttr =
+          mlir::SymbolRefAttr::get(builder.getContext(), globalName);
+      return builder.create<fir::AddrOfOp>(
+          loc, builder.getRefType(fir::BoxType::get(builder.getNoneType())),
+          symAttr);
+    }
+  }
   while (true) {
     mlir::Operation *defOp = addr.getDefiningOp();
     if (auto op = mlir::dyn_cast<fir::LoadOp>(defOp)) {
@@ -1088,7 +1108,8 @@ mlir::Value fir::runtime::genAliasCreate(fir::FirOpBuilder &builder,
                                          mlir::Value aliasUcobounds,
                                          mlir::Type handleTy) {
   mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
-  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, ptrTy, ptrTy);
+  mlir::Type boxTy = fir::BoxType::get(builder.getNoneType());
+  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, boxTy, boxTy, ptrTy);
   mlir::func::FuncOp funcOp =
       builder.createFunction(loc, PRIFNAME_SUB("alias_create"), ftype);
 
@@ -1096,6 +1117,8 @@ mlir::Value fir::runtime::genAliasCreate(fir::FirOpBuilder &builder,
   mlir::Value aliasHandle =
       builder.createBox(loc, builder.createTemporary(loc, handleTy));
 
+  fir::runtime::computeLastUcobound(builder, loc, aliasLcobounds,
+                                    aliasUcobounds);
   llvm::SmallVector<mlir::Value> localArgs = fir::runtime::createArguments(
       builder, loc, ftype, sourceHandle, aliasLcobounds, aliasUcobounds,
       aliasHandle);

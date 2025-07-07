@@ -288,6 +288,59 @@ static void remapActualToDummyDescriptors(
   }
 }
 
+void genAliasedCoarray(mlir::Location loc,
+                       Fortran::lower::AbstractConverter &converter,
+                       mlir::Value &coarray,
+                       const Fortran::semantics::Symbol &dummyArgSym) {
+  std::string globalName =
+      converter.mangleName(dummyArgSym) + "_coarray_handle";
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+  mlir::Value sourceHandle =
+      fir::runtime::getCoarrayHandle(builder, loc, coarray);
+  auto [aliasLcobounds, aliasUcobounds] =
+      Fortran::lower::genCoarrayCoBounds(converter, loc, dummyArgSym);
+  mlir::Type handleTy = Fortran::lower::getCoarrayHandleType(builder, loc);
+  mlir::Value aliasCoarray = fir::runtime::genAliasCreate(
+      builder, loc, sourceHandle, aliasLcobounds, aliasUcobounds, handleTy);
+
+  fir::GlobalOp global = builder.getNamedGlobal(globalName);
+  if (!global) {
+    global = builder.createGlobal(loc, aliasCoarray.getType(), globalName);
+    mlir::Region &region = global.getRegion();
+    region.push_back(new mlir::Block);
+    auto insertPt = builder.saveInsertionPoint();
+    builder.setInsertionPointToStart(&region.back());
+    auto box = fir::factory::createUnallocatedBox(
+        builder, loc, aliasCoarray.getType(), std::nullopt);
+    builder.create<fir::HasValueOp>(loc, box);
+    builder.restoreInsertionPoint(insertPt);
+  }
+  auto addrOf =
+      builder
+          .create<fir::AddrOfOp>(loc, global.resultType(), global.getSymbol())
+          .getResult();
+  builder.create<fir::StoreOp>(loc, aliasCoarray, addrOf);
+}
+
+void genDestroyAliasedCoarray(mlir::Location loc,
+                              Fortran::lower::AbstractConverter &converter,
+                              const Fortran::semantics::Symbol &dummyArgSym) {
+  std::string globalName =
+      converter.mangleName(dummyArgSym) + "_coarray_handle";
+  fir::FirOpBuilder &builder = converter.getFirOpBuilder();
+
+  fir::GlobalOp global = builder.getNamedGlobal(globalName);
+  auto addrOf =
+      builder
+          .create<fir::AddrOfOp>(loc, global.resultType(), global.getSymbol())
+          .getResult();
+  mlir::Value aliasCoarray = builder.create<fir::LoadOp>(loc, addrOf);
+  fir::runtime::genAliasDestroy(builder, loc, aliasCoarray);
+  mlir::Value unallocBox = fir::getBase(fir::factory::createUnallocatedBox(
+      builder, loc, aliasCoarray.getType(), std::nullopt));
+  builder.create<fir::StoreOp>(loc, unallocBox, addrOf);
+}
+
 std::pair<Fortran::lower::LoweredResult, bool>
 Fortran::lower::genCallOpAndResult(
     mlir::Location loc, Fortran::lower::AbstractConverter &converter,
@@ -559,6 +612,15 @@ Fortran::lower::genCallOpAndResult(
     }
   }
 
+  // Generate aliased coarray for dummy coarray argument if needed.
+  for (auto [oper, arg] : llvm::zip(operands, caller.getPassedArguments())) {
+    const Fortran::semantics::Symbol *dummySym = caller.getDummySymbol(arg);
+    if (dummySym && Fortran::evaluate::IsCoarray(dummySym)) {
+      mlir::Value coArg{caller.getInput(arg)};
+      genAliasedCoarray(loc, converter, coArg, *dummySym);
+    }
+  }
+
   if (!caller.getCallDescription().chevrons().empty()) {
     // A call to a CUDA kernel with the chevron syntax.
 
@@ -695,6 +757,14 @@ Fortran::lower::genCallOpAndResult(
     builder.create<fir::SaveResultOp>(loc, callResult,
                                       fir::getBase(*allocatedResult),
                                       arrayResultShape, resultLengths);
+  }
+
+  // Destroying all created aliased coarray if needed.
+  for (auto [oper, arg] : llvm::zip(operands, caller.getPassedArguments())) {
+    const Fortran::semantics::Symbol *dummySym = caller.getDummySymbol(arg);
+    if (dummySym && Fortran::evaluate::IsCoarray(dummySym)) {
+      genDestroyAliasedCoarray(loc, converter, *dummySym);
+    }
   }
 
   if (evaluateInMemory) {

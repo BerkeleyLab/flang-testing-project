@@ -681,10 +681,34 @@ mlir::Value Fortran::lower::genAllocateCoarray(
   fir::runtime::genPointerAssociateScalar(builder, loc, fir::getBase(box),
                                           allocMem);
 
+  // Storing it as a global variable
+  {
+    std::string globalName = converter.mangleName(sym) + "_coarray_handle";
+    if (auto designate =
+            mlir::dyn_cast<hlfir::DesignateOp>(box.getAddr().getDefiningOp())) {
+      if (designate.getComponent()) {
+        globalName = designate.getComponent().value().getValue().str() +
+                     "_coarray_handle";
+        while (auto designateComp = mlir::dyn_cast<hlfir::DesignateOp>(
+                   designate.getMemref().getDefiningOp())) {
+          globalName = designateComp.getComponent().value().getValue().str() +
+                       "_" + globalName;
+          designate = designateComp;
+        }
+        auto declare = designate.getMemref().getDefiningOp<hlfir::DeclareOp>();
+        globalName = declare.getUniqName().getValue().str() + "_" + globalName;
+      }
+    }
+    mlir::SymbolRefAttr symAttr =
+        mlir::SymbolRefAttr::get(builder.getContext(), globalName);
+    auto addrOf = builder.create<fir::AddrOfOp>(
+        loc, builder.getRefType(coarrayHandle.getType()), symAttr);
+    builder.create<fir::StoreOp>(loc, coarrayHandle, addrOf);
+  }
+
   // Storing coarrayHandle to the variable declaration
   if (auto declare =
           mlir::dyn_cast<hlfir::DeclareOp>(box.getAddr().getDefiningOp())) {
-    coarrayHandle = builder.createBox(loc, coarrayHandle);
     builder.create<fir::StoreOp>(loc, coarrayHandle,
                                  declare.getCoarrayHandle());
   }

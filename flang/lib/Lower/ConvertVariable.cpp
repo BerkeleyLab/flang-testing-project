@@ -324,7 +324,8 @@ mlir::Value Fortran::lower::genInitialDataTarget(
 static mlir::Value genDefaultInitializerValue(
     Fortran::lower::AbstractConverter &converter, mlir::Location loc,
     const Fortran::semantics::Symbol &sym, mlir::Type symTy,
-    Fortran::lower::StatementContext &stmtCtx);
+    Fortran::lower::StatementContext &stmtCtx,
+    std::string prefixComponentName = {});
 
 /// Generate the initial value of a derived component \p component and insert
 /// it into the derived type initial value \p insertInto of type \p recTy.
@@ -332,7 +333,8 @@ static mlir::Value genDefaultInitializerValue(
 static mlir::Value genComponentDefaultInit(
     Fortran::lower::AbstractConverter &converter, mlir::Location loc,
     const Fortran::semantics::Symbol &component, fir::RecordType recTy,
-    mlir::Value insertInto, Fortran::lower::StatementContext &stmtCtx) {
+    mlir::Value insertInto, Fortran::lower::StatementContext &stmtCtx,
+    std::string prefixComponentName = {}) {
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
   std::string name = converter.getRecordTypeFieldName(component);
   mlir::Type componentTy = recTy.getType(name);
@@ -360,8 +362,10 @@ static mlir::Value genComponentDefaultInit(
           builder, loc, componentTy, std::nullopt);
     } else if (Fortran::lower::hasDefaultInitialization(component)) {
       // Component type has default initialization.
+      std::string prefix = prefixComponentName + "_" +
+                           converter.getRecordTypeFieldName(component);
       componentValue = genDefaultInitializerValue(converter, loc, component,
-                                                  componentTy, stmtCtx);
+                                                  componentTy, stmtCtx, prefix);
     } else {
       // Component has no initial value. Set its bits to zero by extension
       // to match what is expected because other compilers are doing it.
@@ -397,7 +401,8 @@ static mlir::Value genComponentDefaultInit(
 static mlir::Value genDefaultInitializerValue(
     Fortran::lower::AbstractConverter &converter, mlir::Location loc,
     const Fortran::semantics::Symbol &sym, mlir::Type symTy,
-    Fortran::lower::StatementContext &stmtCtx) {
+    Fortran::lower::StatementContext &stmtCtx,
+    std::string prefixComponentName) {
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
   mlir::Type scalarType = symTy;
   fir::SequenceType sequenceType;
@@ -428,8 +433,27 @@ static mlir::Value genDefaultInitializerValue(
       assert(scopeIter != derivedScope->cend() &&
              "failed to find derived type component symbol");
       const Fortran::semantics::Symbol &component = scopeIter->second.get();
-      initialValue = genComponentDefaultInit(converter, loc, component, recTy,
-                                             initialValue, stmtCtx);
+      initialValue =
+          genComponentDefaultInit(converter, loc, component, recTy,
+                                  initialValue, stmtCtx, prefixComponentName);
+      if (Fortran::evaluate::IsCoarray(component)) {
+        std::string globalName = prefixComponentName + "_" +
+                                 converter.getRecordTypeFieldName(component) +
+                                 "_coarray_handle";
+        fir::GlobalOp global = builder.getNamedGlobal(globalName);
+        if (!global) {
+          mlir::Type handleTy = fir::BoxType::get(
+              Fortran::lower::getCoarrayHandleType(builder, loc));
+          global = builder.createGlobal(loc, handleTy, globalName,
+                                        builder.createLinkOnceLinkage());
+          createGlobalInitialization(
+              builder, global, [&](fir::FirOpBuilder &b) {
+                auto box = fir::factory::createUnallocatedBox(
+                    builder, loc, handleTy, std::nullopt);
+                b.create<fir::HasValueOp>(loc, box);
+              });
+        }
+      }
     }
   } else {
     Fortran::semantics::OrderedComponentIterator components(
@@ -439,8 +463,9 @@ static mlir::Value genDefaultInitializerValue(
       // components and will be looped through right after.
       if (component.test(Fortran::semantics::Symbol::Flag::ParentComp))
         continue;
-      initialValue = genComponentDefaultInit(converter, loc, component, recTy,
-                                             initialValue, stmtCtx);
+      initialValue =
+          genComponentDefaultInit(converter, loc, component, recTy,
+                                  initialValue, stmtCtx, prefixComponentName);
     }
   }
 
@@ -579,8 +604,8 @@ fir::GlobalOp Fortran::lower::defineGlobal(
           builder, global, [&](fir::FirOpBuilder &builder) {
             Fortran::lower::StatementContext stmtCtx(
                 /*cleanupProhibited=*/true);
-            mlir::Value initVal =
-                genDefaultInitializerValue(converter, loc, sym, symTy, stmtCtx);
+            mlir::Value initVal = genDefaultInitializerValue(
+                converter, loc, sym, symTy, stmtCtx, converter.mangleName(sym));
             mlir::Value castTo = builder.createConvert(loc, symTy, initVal);
             builder.create<fir::HasValueOp>(loc, castTo);
           });
@@ -846,7 +871,8 @@ void Fortran::lower::defaultInitializeAtRuntime(
               Fortran::lower::StatementContext stmtCtx(
                   /*cleanupProhibited=*/true);
               mlir::Value initVal = genDefaultInitializerValue(
-                  converter, loc, sym, symTy, stmtCtx);
+                  converter, loc, sym, symTy, stmtCtx,
+                  converter.mangleName(sym));
               mlir::Value castTo = builder.createConvert(loc, symTy, initVal);
               builder.create<fir::HasValueOp>(loc, castTo);
             });
@@ -2133,9 +2159,27 @@ void Fortran::lower::mapSymbolAttributes(
     // describing the entity if this is a coarray.
     mlir::Value coarrayHandle;
     if (Fortran::evaluate::IsCoarray(sym)) {
-      coarrayHandle = builder.createTemporary(
-          loc, fir::BoxType::get(
-                   Fortran::lower::getCoarrayHandleType(builder, loc)));
+      std::string globalName = converter.mangleName(sym) + "_coarray_handle";
+      if (auto global = builder.getNamedGlobal(globalName)) {
+        coarrayHandle = builder
+                            .create<fir::AddrOfOp>(loc, global.resultType(),
+                                                   global.getSymbol())
+                            .getResult();
+      } else {
+        mlir::Type handleTy = fir::BoxType::get(
+            Fortran::lower::getCoarrayHandleType(builder, loc));
+        global = builder.createGlobal(loc, handleTy, globalName,
+                                      builder.createLinkOnceLinkage());
+        createGlobalInitialization(builder, global, [&](fir::FirOpBuilder &b) {
+          auto box = fir::factory::createUnallocatedBox(builder, loc, handleTy,
+                                                        std::nullopt);
+          b.create<fir::HasValueOp>(loc, box);
+        });
+        coarrayHandle = builder
+                            .create<fir::AddrOfOp>(loc, global.resultType(),
+                                                   global.getSymbol())
+                            .getResult();
+      }
     }
     fir::MutableBoxValue box = Fortran::lower::createMutableBox(
         converter, loc, var, boxAlloc, nonDeferredLenParams,
@@ -2211,10 +2255,24 @@ void Fortran::lower::mapSymbolAttributes(
       }
       mlir::Value coarrayHandle;
       if (Fortran::evaluate::IsCoarray(sym)) {
-        // FIXME: Adding call to prif_alias_create ?
-        // This will fail later because the coarrayHandle doesn't exist.
-        coarrayHandle =
-            builder.genAbsentOp(loc, fir::BoxType::get(builder.getNoneType()));
+        std::string globalName = converter.mangleName(sym) + "_coarray_handle";
+        fir::GlobalOp global = builder.getNamedGlobal(globalName);
+        if (!global) {
+          mlir::Type handleTy = fir::BoxType::get(
+              Fortran::lower::getCoarrayHandleType(builder, loc));
+          global = builder.createGlobal(loc, handleTy, globalName,
+                                        builder.createLinkOnceLinkage());
+          createGlobalInitialization(
+              builder, global, [&](fir::FirOpBuilder &b) {
+                auto box = fir::factory::createUnallocatedBox(
+                    builder, loc, handleTy, std::nullopt);
+                b.create<fir::HasValueOp>(loc, box);
+              });
+        }
+        coarrayHandle = builder
+                            .create<fir::AddrOfOp>(loc, global.resultType(),
+                                                   global.getSymbol())
+                            .getResult();
       }
       genBoxDeclare(converter, symMap, sym, dummyArg, lbounds, explicitParams,
                     explicitExtents, replace, coarrayHandle);
