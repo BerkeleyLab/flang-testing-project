@@ -38,7 +38,7 @@ std::int64_t RTDECL(SizeDim)(const Descriptor &array, int dim,
 void RTDECL(Ubound)(void *result, const Descriptor &array, int kind,
     const char *sourceFile = nullptr, int line = 0);
 
-std::size_t RTDECL(SizeInBytes)(const Descriptor &desc);
+std::int64_t RTDECL(SizeInBytes)(const Descriptor &desc);
 
 } // extern "C"
 } // namespace Fortran::runtime

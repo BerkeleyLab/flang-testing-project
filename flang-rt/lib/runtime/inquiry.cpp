@@ -93,7 +93,7 @@ void RTDEF(Lbound)(void *result, const Descriptor &array, int kind,
   }
 }
 
-std::size_t RTDEF(SizeInBytes)(const Descriptor &desc) {
+std::int64_t RTDEF(SizeInBytes)(const Descriptor &desc) {
   return desc.SizeInBytes();
 }
 

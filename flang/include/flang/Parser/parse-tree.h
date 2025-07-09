@@ -1679,14 +1679,19 @@ using Cosubscript = ScalarIntExpr;
 // R1115 team-value -> scalar-expr
 WRAPPER_CLASS(TeamValue, Scalar<common::Indirection<Expr>>);
 
+// R1171 event-variable -> scalar-variable
+using EventVariable = Scalar<Variable>;
+
 // R926 image-selector-spec ->
 //        STAT = stat-variable | TEAM = team-value |
-//        TEAM_NUMBER = scalar-int-expr
+//        TEAM_NUMBER = scalar-int-expr |
+//        NOTIFY = notify-variable
 struct ImageSelectorSpec {
   WRAPPER_CLASS(Stat, Scalar<Integer<common::Indirection<Variable>>>);
   WRAPPER_CLASS(Team_Number, ScalarIntExpr);
+  WRAPPER_CLASS(Notify, Scalar<common::Indirection<Variable>>);
   UNION_CLASS_BOILERPLATE(ImageSelectorSpec);
-  std::variant<Stat, TeamValue, Team_Number> u;
+  std::variant<Stat, TeamValue, Team_Number, Notify> u;
 };
 
 // R924 image-selector ->
@@ -2570,9 +2575,6 @@ struct SyncTeamStmt {
   TUPLE_CLASS_BOILERPLATE(SyncTeamStmt);
   std::tuple<TeamValue, std::list<StatOrErrmsg>> t;
 };
-
-// R1171 event-variable -> scalar-variable
-using EventVariable = Scalar<Variable>;
 
 // R1170 event-post-stmt -> EVENT POST ( event-variable [, sync-stat-list] )
 struct EventPostStmt {
