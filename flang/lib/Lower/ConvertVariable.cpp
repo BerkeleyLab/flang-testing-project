@@ -1124,6 +1124,23 @@ static void instantiateLocal(Fortran::lower::AbstractConverter &converter,
       });
     }
   }
+  if (Fortran::evaluate::IsCoarray(var.getSymbol()) && 
+      !Fortran::semantics::IsAllocatableOrPointer(var.getSymbol()) && 
+      !Fortran::semantics::IsDummy(var.getSymbol())) {
+    mlir::Location loc = converter.getCurrentLocation();
+    fir::ExtendedValue exv =
+        converter.getSymbolExtendedValue(var.getSymbol(), &symMap);
+    auto *sym = &var.getSymbol();
+    const Fortran::semantics::Scope &owner = sym->owner();
+    if (owner.kind() != Fortran::semantics::Scope::Kind::MainProgram) {
+      auto *converterPtr = &converter;
+      converter.getFctCtx().attachCleanup([converterPtr, builder, loc, exv]() {
+        mlir::Value emptyErrmsg = builder->create<fir::AbsentOp>(
+            loc, fir::BoxType::get(mlir::NoneType::get(builder->getContext())));
+        Fortran::lower::genDeallocateCoarray(*converterPtr, loc, fir::getBase(exv), emptyErrmsg);
+      });
+    }
+  }
   if (std::optional<VariableCleanUp> cleanup =
           needDeallocationOrFinalization(var)) {
     auto *builder = &converter.getFirOpBuilder();
@@ -2504,8 +2521,9 @@ void Fortran::lower::mapSymbolAttributes(
 
   if (Fortran::evaluate::IsCoarray(sym)) {
     if (auto seqTy = fir::unwrapUntilSeqType(addr.getType())) {
-      if (fir::sequenceWithNonConstantShape(seqTy))
+      if (!arg && fir::sequenceWithNonConstantShape(seqTy)) {
         TODO(loc, "Allocation of coarray with non constant shape.");
+      }
     }
     fir::ExtendedValue preAllocExv;
     if (ba.isChar()) {
@@ -2514,7 +2532,7 @@ void Fortran::lower::mapSymbolAttributes(
       else
         preAllocExv = fir::CharBoxValue{addr, len};
     } else
-      preAllocExv = addr;
+      preAllocExv = arg ? arg : addr;
     auto [addrCoarray, coarrayHandle] =
         Fortran::lower::genAllocateCoarray(converter, loc, sym, preAllocExv);
     if (var.isGlobal()) {

@@ -63,6 +63,8 @@ mlir::Value fir::runtime::getCoarrayHandle(fir::FirOpBuilder &builder,
       addr = op.getMemref();
     } else if (auto op = mlir::dyn_cast<fir::BoxAddrOp>(defOp)) {
       addr = op.getVal();
+    } else if (auto op = mlir::dyn_cast<fir::ReboxOp>(defOp)) {
+      addr = op.getBox();
     } else if (auto op = mlir::dyn_cast<fir::EmboxOp>(defOp)) {
       addr = op.getMemref();
     } else if (auto op = mlir::dyn_cast<fir::EmboxCharOp>(defOp)) {
