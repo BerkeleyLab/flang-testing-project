@@ -162,7 +162,6 @@ void Fortran::lower::genStopStatement(
     operands.push_back(
         builder.createConvert(loc, calleeType.getInput(operands.size()), q));
     q = fir::getBase(converter.genExprAddr(*expr, stmtCtx));
-    q = builder.createBox(loc, q);
   } else {
     operands.push_back(builder.createIntegerConstant(
         loc, calleeType.getInput(operands.size()), 0));

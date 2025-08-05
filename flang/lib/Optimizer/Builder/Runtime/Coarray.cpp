@@ -131,21 +131,24 @@ void fir::runtime::genStopCoarray(fir::FirOpBuilder &builder,
                                   mlir::Location loc, mlir::Value quiet,
                                   mlir::Value stopCodeInt,
                                   mlir::Value stopCodeChar, bool isError) {
-  mlir::Type ptrTy = fir::PointerType::get(builder.getNoneType());
+  mlir::Type logTy = fir::LogicalType::get(builder.getContext(), 4);
+  mlir::Type refI32Ty = builder.getRefType(builder.getI32Type());
   mlir::Type boxTy = fir::BoxType::get(builder.getNoneType());
-  mlir::FunctionType ftype = PRIF_FUNCTYPE(ptrTy, ptrTy, boxTy);
+  mlir::FunctionType ftype =
+      PRIF_FUNCTYPE(builder.getRefType(logTy), refI32Ty, boxTy);
   mlir::func::FuncOp funcOp = builder.createFunction(
       loc, isError ? PRIFNAME_SUB("error_stop") : PRIFNAME_SUB("stop"), ftype);
 
   if (isStaticallyAbsent(quiet)) {
-    quiet = builder.createTemporary(loc, builder.getI1Type());
-    mlir::Value t =
-        builder.createIntegerConstant(loc, builder.getI1Type(), true);
+    quiet = builder.createTemporary(loc, logTy);
+    mlir::Value t = builder.createConvert(
+        loc, logTy,
+        builder.createIntegerConstant(loc, builder.getI1Type(), true));
     builder.create<fir::StoreOp>(loc, t, quiet);
   }
   if (isStaticallyAbsent(stopCodeInt)) {
     stopCodeInt = builder.create<fir::AbsentOp>(
-        loc, fir::BoxType::get(builder.getNoneType()));
+        loc, builder.getRefType(builder.getNoneType()));
   }
   if (isStaticallyAbsent(stopCodeChar)) {
     stopCodeChar = builder.create<fir::AbsentOp>(
